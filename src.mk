@@ -98,6 +98,7 @@ LIB_SOURCES =                                                   \
   memory/jemalloc_nodump_allocator.cc                           \
   memory/memkind_kmem_allocator.cc                              \
   memory/memkind_pmem_allocator.cc                              \
+  memory/pmdk_transient_allocator.cc                            \
   memtable/alloc_tracker.cc                                     \
   memtable/hash_linklist_rep.cc                                 \
   memtable/hash_skiplist_rep.cc                                 \
@@ -423,6 +424,7 @@ TEST_MAIN_SOURCES =                                                     \
   logging/event_logger_test.cc                                          \
   memory/arena_test.cc                                                  \
   memory/memkind_kmem_allocator_test.cc                                 \
+  memory/pmdk_transient_allocator_test.cc                               \
   memtable/inlineskiplist_test.cc                                       \
   memtable/skiplist_test.cc                                             \
   memtable/write_buffer_manager_test.cc                                 \

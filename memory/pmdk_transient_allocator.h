@@ -6,19 +6,21 @@
 
 #pragma once
 
-#ifdef MEMKIND
+#ifdef PMDK
 
-#include <memkind.h>
+#include <libpmemobj.h>
 #include "rocksdb/memory_allocator.h"
 
 namespace rocksdb {
 
-class MemkindPmemAllocator : public MemoryAllocator {
+class PMDKTransAllocator : public MemoryAllocator {
  private:
-  memkind_t pmem_kind;
+  PMEMobjpool* pop = nullptr;
+  PMEMoid root;
+  static int dummy_construct(PMEMobjpool* pop, void* ptr, void* arg){return 0;}
  public:
-  MemkindPmemAllocator();
-  const char* Name() const override { return "MemkindPmemAllocator"; };
+  PMDKTransAllocator();
+  const char* Name() const override { return "PMDKTransAllocator"; };
   void* Allocate(size_t size) override;
   void Deallocate(void* p) override;
 #ifdef ROCKSDB_MALLOC_USABLE_SIZE
@@ -27,4 +29,4 @@ class MemkindPmemAllocator : public MemoryAllocator {
 };
 
 }  // namespace rocksdb
-#endif  // MEMKIND
+#endif  // PMDK

@@ -16,12 +16,18 @@
 #define PMEM_DIR "/mnt/pmem/memkind"
 #endif
 
-#define PMEM_MAX_SIZE 1024*1024*32 // 32MiB
+#define PMEM_MAX_SIZE 1024*1024*256 // 256MiB
 
 namespace rocksdb {
 
 MemkindPmemAllocator::MemkindPmemAllocator(){
-  Init();
+  assert(PMEM_MAX_SIZE > MEMKIND_PMEM_MIN_SIZE);
+  auto err = memkind_create_pmem(PMEM_DIR, PMEM_MAX_SIZE, &pmem_kind);
+  if (err != 0) {
+    std::cerr<<"memkind_create_pmem failed with error "<<err<<std::endl;
+    std::cerr<<"MEMKIND_PMEM_MIN_SIZE: "<<MEMKIND_PMEM_MIN_SIZE<<std::endl;
+
+  }
 }
 
 void* MemkindPmemAllocator::Allocate(size_t size) {
@@ -34,21 +40,6 @@ void* MemkindPmemAllocator::Allocate(size_t size) {
 
 void MemkindPmemAllocator::Deallocate(void* p) {
   memkind_free(pmem_kind, p);
-}
-
-int MemkindPmemAllocator::Init(){
-  assert(PMEM_MAX_SIZE > MEMKIND_PMEM_MIN_SIZE);
-  auto err = memkind_create_pmem(PMEM_DIR, PMEM_MAX_SIZE, &pmem_kind);
-  if (err != 0){
-    throw std::bad_alloc(); // TODO: define new exception types here.
-    // std::cerr<<"failed!"<<std::endl;
-  }
-  // std::cerr<<"succeeded!"<<std::endl;
-  return 0;
-}
-
-int MemkindPmemAllocator::Finalize(){
-  return 0;
 }
 
 #ifdef ROCKSDB_MALLOC_USABLE_SIZE

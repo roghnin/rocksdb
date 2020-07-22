@@ -74,21 +74,56 @@ extern Status NewJemallocNodumpAllocator(
     JemallocAllocatorOptions& options,
     std::shared_ptr<MemoryAllocator>* memory_allocator);
 
-// PersistentMemoryAllocator is an interface that a client can implement to
-// supply custom persistent memory allocation, deallocation, initialization and
-// finlization functions. All methods should be thread-safe.
-class PersistentMemoryAllocator : public MemoryAllocator {
+template <typename PPTR>
+class PersistentMemoryAllocator {
  public:
   virtual ~PersistentMemoryAllocator() = default;
 
-  // Initialize the persistent memory allocator. Typically setting up
-  // memory-mapped files in DAX-enabled file systems and/or recover existing
-  // heap(s).
-  virtual int Init() = 0;
+  // Name of the cache allocator, printed in the log
+  virtual const char* Name() const = 0;
 
-  // Finilization of persistent memory allocator. Typically finish writing back
-  // or flushing to NVM, and close the file.
-  virtual int Finalize() = 0;
+  // Allocate a block of at least size. Has to be thread-safe.
+  virtual PPTR Allocate(size_t size) = 0;
+
+  // Deallocate previously allocated block. Has to be thread-safe.
+  virtual void Deallocate(PPTR p) = 0;
+
+  // Get a PPTR to the persistent root of the heap.
+  virtual PPTR GetRoot() = 0;
+
+  // Returns the memory size of the block allocated at p. The default
+  // implementation that just returns the original allocation_size is fine.
+  virtual size_t UsableSize(PPTR /*p*/, size_t allocation_size) const {
+    // default implementation just returns the allocation size
+    return allocation_size;
+  }
+};
+
+template <typename PPTR>
+class PersistentMemoryAllocatorMTFF {
+ public:
+  virtual ~PersistentMemoryAllocatorMTFF() = default;
+
+  // Name of the cache allocator, printed in the log
+  virtual const char* Name() const = 0;
+
+  // Allocate a block of at least size to receiver PPTR atomically. Has to be
+  // thread-safe.
+  virtual void AllocateTo(size_t size, PPTR* receiver) = 0;
+
+  // Deallocate previously allocated block from PPTR atomically. Has to be
+  // thread-safe.
+  virtual void DeallocateFrom(PPTR* p) = 0;
+
+  // Get a PPTR to the persistent root of the heap.
+  virtual PPTR GetRoot() = 0;
+
+  // Returns the memory size of the block allocated at p. The default
+  // implementation that just returns the original allocation_size is fine.
+  virtual size_t UsableSize(PPTR /*p*/, size_t allocation_size) const {
+    // default implementation just returns the allocation size
+    return allocation_size;
+  }
 };
 
 }  // namespace ROCKSDB_NAMESPACE
