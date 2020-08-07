@@ -359,6 +359,8 @@ endif
 
 ifdef USE_PMDK
 	PLATFORM_LDFLAGS += -L/usr/local/lib64 -lpmem -lpmemobj
+	PLATFORM_CXXFLAGS += -DPMDK
+	PLATFORM_CCFLAGS  += -DPMDK
 endif
 
 ifndef USE_FOLLY_DISTRIBUTED_MUTEX
@@ -568,7 +570,6 @@ ifdef ASSERT_STATUS_CHECKED
 		iostats_context_test \
 		memkind_kmem_allocator_test \
 		memkind_pmem_allocator_test \
-		pmdk_transient_allocator_test \
 		merger_test \
 		mock_env_test \
 		object_registry_test \
@@ -1235,9 +1236,6 @@ memkind_kmem_allocator_test: memory/memkind_kmem_allocator_test.o $(TEST_LIBRARY
 	$(AM_LINK)
 
 memkind_pmem_allocator_test: memory/memkind_pmem_allocator_test.o $(TEST_LIBRARY) $(LIBRARY)
-	$(AM_LINK)
-
-pmdk_transient_allocator_test: memory/pmdk_transient_allocator_test.o $(TEST_LIBRARY) $(LIBRARY)
 	$(AM_LINK)
 
 autovector_test: $(OBJ_DIR)/util/autovector_test.o $(TEST_LIBRARY) $(LIBRARY)
