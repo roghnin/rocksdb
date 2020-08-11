@@ -18,83 +18,6 @@
 
 namespace ROCKSDB_NAMESPACE {
 
-NVMHandleTable::NVMHandleTable() : list_(nullptr), length_(0), elems_(0) {
-  Resize();
-}
-
-NVMHandleTable::~NVMHandleTable() {
-  ApplyToAllCacheEntries([](NVMHandle* h) {
-    if (!h->HasRefs()) {
-      h->Free();
-    }
-  });
-  delete[] list_;
-}
-
-NVMHandle* NVMHandleTable::Lookup(const Slice& key, uint32_t hash) {
-  return *FindPointer(key, hash);
-}
-
-NVMHandle* NVMHandleTable::Insert(NVMHandle* h) {
-  NVMHandle** ptr = FindPointer(h->key(), h->hash);
-  NVMHandle* old = *ptr;
-  h->next_hash = (old == nullptr ? nullptr : old->next_hash);
-  *ptr = h;
-  if (old == nullptr) {
-    ++elems_;
-    if (elems_ > length_) {
-      // Since each cache entry is fairly large, we aim for a small
-      // average linked list length (<= 1).
-      Resize();
-    }
-  }
-  return old;
-}
-
-NVMHandle* NVMHandleTable::Remove(const Slice& key, uint32_t hash) {
-  NVMHandle** ptr = FindPointer(key, hash);
-  NVMHandle* result = *ptr;
-  if (result != nullptr) {
-    *ptr = result->next_hash;
-    --elems_;
-  }
-  return result;
-}
-
-NVMHandle** NVMHandleTable::FindPointer(const Slice& key, uint32_t hash) {
-  NVMHandle** ptr = &list_[hash & (length_ - 1)];
-  while (*ptr != nullptr && ((*ptr)->hash != hash || key != (*ptr)->key())) {
-    ptr = &(*ptr)->next_hash;
-  }
-  return ptr;
-}
-
-void NVMHandleTable::Resize() {
-  uint32_t new_length = 16;
-  while (new_length < elems_ * 1.5) {
-    new_length *= 2;
-  }
-  NVMHandle** new_list = new NVMHandle*[new_length];
-  memset(new_list, 0, sizeof(new_list[0]) * new_length);
-  uint32_t count = 0;
-  for (uint32_t i = 0; i < length_; i++) {
-    NVMHandle* h = list_[i];
-    while (h != nullptr) {
-      NVMHandle* next = h->next_hash;
-      uint32_t hash = h->hash;
-      NVMHandle** ptr = &new_list[hash & (new_length - 1)];
-      h->next_hash = *ptr;
-      *ptr = h;
-      h = next;
-      count++;
-    }
-  }
-  assert(elems_ == count);
-  delete[] list_;
-  list_ = new_list;
-  length_ = new_length;
-}
-
 NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
                              double high_pri_pool_ratio,
                              bool use_adaptive_mutex,
@@ -116,41 +39,12 @@ NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
 }
 
 void NVMCacheShard::EraseUnRefEntries() {
-  autovector<NVMHandle*> last_reference_list;
-  {
-    MutexLock l(&mutex_);
-    while (lru_.next != &lru_) {
-      NVMHandle* old = lru_.next;
-      // LRU list contains only elements which can be evicted
-      assert(old->InCache() && !old->HasRefs());
-      LRU_Remove(old);
-      table_.Remove(old->key(), old->hash);
-      old->SetInCache(false);
-      size_t total_charge = old->CalcTotalCharge(metadata_charge_policy_);
-      assert(usage_ >= total_charge);
-      usage_ -= total_charge;
-      last_reference_list.push_back(old);
-    }
-  }
-
-  for (auto entry : last_reference_list) {
-    entry->Free();
-  }
+  // TODO
 }
 
 void NVMCacheShard::ApplyToAllCacheEntries(void (*callback)(void*, size_t),
                                            bool thread_safe) {
-  const auto applyCallback = [&]() {
-    table_.ApplyToAllCacheEntries(
-        [callback](NVMHandle* h) { callback(h->value, h->charge); });
-  };
-
-  if (thread_safe) {
-    MutexLock l(&mutex_);
-    applyCallback();
-  } else {
-    applyCallback();
-  }
+  // TODO
 }
 
 void NVMCacheShard::TEST_GetLRUList(NVMHandle** lru, NVMHandle** lru_low_pri) {
@@ -160,13 +54,8 @@ void NVMCacheShard::TEST_GetLRUList(NVMHandle** lru, NVMHandle** lru_low_pri) {
 }
 
 size_t NVMCacheShard::TEST_GetLRUSize() {
-  MutexLock l(&mutex_);
-  NVMHandle* lru_handle = lru_.next;
   size_t lru_size = 0;
-  while (lru_handle != &lru_) {
-    lru_size++;
-    lru_handle = lru_handle->next;
-  }
+  // TODO
   return lru_size;
 }
 
@@ -234,18 +123,7 @@ void NVMCacheShard::MaintainPoolSize() {
 
 void NVMCacheShard::EvictFromLRU(size_t charge,
                                  autovector<NVMHandle*>* deleted) {
-  while ((usage_ + charge) > capacity_ && lru_.next != &lru_) {
-    NVMHandle* old = lru_.next;
-    // LRU list contains only elements which can be evicted
-    assert(old->InCache() && !old->HasRefs());
-    LRU_Remove(old);
-    table_.Remove(old->key(), old->hash);
-    old->SetInCache(false);
-    size_t old_total_charge = old->CalcTotalCharge(metadata_charge_policy_);
-    assert(usage_ >= old_total_charge);
-    usage_ -= old_total_charge;
-    deleted->push_back(old);
-  }
+  // TODO
 }
 
 void NVMCacheShard::SetCapacity(size_t capacity) {
@@ -269,18 +147,8 @@ void NVMCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit) {
 }
 
 Cache::Handle* NVMCacheShard::Lookup(const Slice& key, uint32_t hash) {
-  MutexLock l(&mutex_);
-  NVMHandle* e = table_.Lookup(key, hash);
-  if (e != nullptr) {
-    assert(e->InCache());
-    if (!e->HasRefs()) {
-      // The entry is in LRU since it's in hash and has no external references
-      LRU_Remove(e);
-    }
-    e->Ref();
-    e->SetHit();
-  }
-  return reinterpret_cast<Cache::Handle*>(e);
+  // TODO
+  return nullptr;
 }
 
 bool NVMCacheShard::Ref(Cache::Handle* h) {
@@ -300,147 +168,21 @@ void NVMCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
 }
 
 bool NVMCacheShard::Release(Cache::Handle* handle, bool force_erase) {
-  if (handle == nullptr) {
-    return false;
-  }
-  NVMHandle* e = reinterpret_cast<NVMHandle*>(handle);
-  bool last_reference = false;
-  {
-    MutexLock l(&mutex_);
-    last_reference = e->Unref();
-    if (last_reference && e->InCache()) {
-      // The item is still in cache, and nobody else holds a reference to it
-      if (usage_ > capacity_ || force_erase) {
-        // The LRU list must be empty since the cache is full
-        assert(lru_.next == &lru_ || force_erase);
-        // Take this opportunity and remove the item
-        table_.Remove(e->key(), e->hash);
-        e->SetInCache(false);
-      } else {
-        // Put the item back on the LRU list, and don't free it
-        LRU_Insert(e);
-        last_reference = false;
-      }
-    }
-    if (last_reference) {
-      size_t total_charge = e->CalcTotalCharge(metadata_charge_policy_);
-      assert(usage_ >= total_charge);
-      usage_ -= total_charge;
-    }
-  }
-
-  // Free the entry here outside of mutex for performance reasons
-  if (last_reference) {
-    e->Free();
-  }
-  return last_reference;
+  // TODO
+  return true;
 }
 
 Status NVMCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              size_t charge,
                              void (*deleter)(const Slice& key, void* value),
                              Cache::Handle** handle, Cache::Priority priority) {
-  // Allocate the memory here outside of the mutex
-  // If the cache is full, we'll have to release it
-  // It shouldn't happen very often though.
-  NVMHandle* e = reinterpret_cast<NVMHandle*>(
-      new char[sizeof(NVMHandle) - 1 + key.size()]);
   Status s = Status::OK();
-  autovector<NVMHandle*> last_reference_list;
-
-  e->value = value;
-  e->deleter = deleter;
-  e->charge = charge;
-  e->key_length = key.size();
-  e->flags = 0;
-  e->hash = hash;
-  e->refs = 0;
-  e->next = e->prev = nullptr;
-  e->SetInCache(true);
-  e->SetPriority(priority);
-  memcpy(e->key_data, key.data(), key.size());
-  size_t total_charge = e->CalcTotalCharge(metadata_charge_policy_);
-
-  {
-    MutexLock l(&mutex_);
-
-    // Free the space following strict LRU policy until enough space
-    // is freed or the lru list is empty
-    EvictFromLRU(total_charge, &last_reference_list);
-
-    if ((usage_ + total_charge) > capacity_ &&
-        (strict_capacity_limit_ || handle == nullptr)) {
-      if (handle == nullptr) {
-        // Don't insert the entry but still return ok, as if the entry inserted
-        // into cache and get evicted immediately.
-        e->SetInCache(false);
-        last_reference_list.push_back(e);
-      } else {
-        delete[] reinterpret_cast<char*>(e);
-        *handle = nullptr;
-        s = Status::Incomplete("Insert failed due to LRU cache being full.");
-      }
-    } else {
-      // Insert into the cache. Note that the cache might get larger than its
-      // capacity if not enough space was freed up.
-      NVMHandle* old = table_.Insert(e);
-      usage_ += total_charge;
-      if (old != nullptr) {
-        s = Status::OkOverwritten();
-        assert(old->InCache());
-        old->SetInCache(false);
-        if (!old->HasRefs()) {
-          // old is on LRU because it's in cache and its reference count is 0
-          LRU_Remove(old);
-          size_t old_total_charge =
-              old->CalcTotalCharge(metadata_charge_policy_);
-          assert(usage_ >= old_total_charge);
-          usage_ -= old_total_charge;
-          last_reference_list.push_back(old);
-        }
-      }
-      if (handle == nullptr) {
-        LRU_Insert(e);
-      } else {
-        e->Ref();
-        *handle = reinterpret_cast<Cache::Handle*>(e);
-      }
-    }
-  }
-
-  // Free the entries here outside of mutex for performance reasons
-  for (auto entry : last_reference_list) {
-    entry->Free();
-  }
-
+  // TODO
   return s;
 }
 
 void NVMCacheShard::Erase(const Slice& key, uint32_t hash) {
-  NVMHandle* e;
-  bool last_reference = false;
-  {
-    MutexLock l(&mutex_);
-    e = table_.Remove(key, hash);
-    if (e != nullptr) {
-      assert(e->InCache());
-      e->SetInCache(false);
-      if (!e->HasRefs()) {
-        // The entry is in LRU since it's in hash and has no external references
-        LRU_Remove(e);
-        size_t total_charge = e->CalcTotalCharge(metadata_charge_policy_);
-        assert(usage_ >= total_charge);
-        usage_ -= total_charge;
-        last_reference = true;
-      }
-    }
-  }
-
-  // Free the entry here outside of mutex for performance reasons
-  // last_reference will only be true if e != nullptr
-  if (last_reference) {
-    e->Free();
-  }
+  // TODO
 }
 
 size_t NVMCacheShard::GetUsage() const {
