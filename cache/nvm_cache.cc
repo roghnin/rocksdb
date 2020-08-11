@@ -47,7 +47,7 @@ void NVMCacheShard::ApplyToAllCacheEntries(void (*callback)(void*, size_t),
   // TODO
 }
 
-void NVMCacheShard::TEST_GetLRUList(NVMHandle** lru, NVMHandle** lru_low_pri) {
+void NVMCacheShard::TEST_GetLRUList(TransientHandle** lru, TransientHandle** lru_low_pri) {
   MutexLock l(&mutex_);
   *lru = &lru_;
   *lru_low_pri = lru_low_pri_;
@@ -64,7 +64,7 @@ double NVMCacheShard::GetHighPriPoolRatio() {
   return high_pri_pool_ratio_;
 }
 
-void NVMCacheShard::LRU_Remove(NVMHandle* e) {
+void NVMCacheShard::LRU_Remove(TransientHandle* e) {
   assert(e->next != nullptr);
   assert(e->prev != nullptr);
   if (lru_low_pri_ == e) {
@@ -82,7 +82,7 @@ void NVMCacheShard::LRU_Remove(NVMHandle* e) {
   }
 }
 
-void NVMCacheShard::LRU_Insert(NVMHandle* e) {
+void NVMCacheShard::LRU_Insert(TransientHandle* e) {
   assert(e->next == nullptr);
   assert(e->prev == nullptr);
   size_t total_charge = e->CalcTotalCharge(metadata_charge_policy_);
@@ -122,12 +122,12 @@ void NVMCacheShard::MaintainPoolSize() {
 }
 
 void NVMCacheShard::EvictFromLRU(size_t charge,
-                                 autovector<NVMHandle*>* deleted) {
+                                 autovector<TransientHandle*>* deleted) {
   // TODO
 }
 
 void NVMCacheShard::SetCapacity(size_t capacity) {
-  autovector<NVMHandle*> last_reference_list;
+  autovector<TransientHandle*> last_reference_list;
   {
     MutexLock l(&mutex_);
     capacity_ = capacity;
@@ -152,7 +152,7 @@ Cache::Handle* NVMCacheShard::Lookup(const Slice& key, uint32_t hash) {
 }
 
 bool NVMCacheShard::Ref(Cache::Handle* h) {
-  NVMHandle* e = reinterpret_cast<NVMHandle*>(h);
+  TransientHandle* e = reinterpret_cast<TransientHandle*>(h);
   MutexLock l(&mutex_);
   // To create another reference - entry must be already externally referenced
   assert(e->HasRefs());
@@ -244,15 +244,15 @@ const CacheShard* NVMCache::GetShard(int shard) const {
 }
 
 void* NVMCache::Value(Handle* handle) {
-  return reinterpret_cast<const NVMHandle*>(handle)->value;
+  return reinterpret_cast<const TransientHandle*>(handle)->value;
 }
 
 size_t NVMCache::GetCharge(Handle* handle) const {
-  return reinterpret_cast<const NVMHandle*>(handle)->charge;
+  return reinterpret_cast<const TransientHandle*>(handle)->charge;
 }
 
 uint32_t NVMCache::GetHash(Handle* handle) const {
-  return reinterpret_cast<const NVMHandle*>(handle)->hash;
+  return reinterpret_cast<const TransientHandle*>(handle)->hash;
 }
 
 void NVMCache::DisownData() {

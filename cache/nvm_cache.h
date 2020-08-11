@@ -23,12 +23,12 @@ using namespace pmem::obj;
 namespace ROCKSDB_NAMESPACE {
 
 // This will be the transient handle of the cache.
-struct NVMHandle {
+struct TransientHandle {
   void* value;
   void (*deleter)(const Slice&, void* value);
-  NVMHandle* next_hash;
-  NVMHandle* next;
-  NVMHandle* prev;
+  TransientHandle* next_hash;
+  TransientHandle* next;
+  TransientHandle* prev;
   size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
   // The hash of key(). Used for fast sharding and comparisons.
@@ -115,7 +115,7 @@ struct NVMHandle {
       meta_charge += malloc_usable_size(static_cast<void*>(this));
 #else
       // This is the size that is used when a new handle is created
-      meta_charge += sizeof(NVMHandle) - 1 + key_length;
+      meta_charge += sizeof(TransientHandle) - 1 + key_length;
 #endif
     }
     return charge + meta_charge;
@@ -167,7 +167,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
 
   virtual std::string GetPrintableOptions() const override;
 
-  void TEST_GetLRUList(NVMHandle** lru, NVMHandle** lru_low_pri);
+  void TEST_GetLRUList(TransientHandle** lru, TransientHandle** lru_low_pri);
 
   //  Retrieves number of elements in LRU, for unit test purpose only
   //  not threadsafe
@@ -177,8 +177,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   double GetHighPriPoolRatio();
 
  private:
-  void LRU_Remove(NVMHandle* e);
-  void LRU_Insert(NVMHandle* e);
+  void LRU_Remove(TransientHandle* e);
+  void LRU_Insert(TransientHandle* e);
 
   // Overflow the last entry in high-pri pool to low-pri pool until size of
   // high-pri pool is no larger than the size specify by high_pri_pool_pct.
@@ -188,7 +188,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   // to hold (usage_ + charge) is freed or the lru list is empty
   // This function is not thread safe - it needs to be executed while
   // holding the mutex_
-  void EvictFromLRU(size_t charge, autovector<NVMHandle*>* deleted);
+  void EvictFromLRU(size_t charge, autovector<TransientHandle*>* deleted);
 
   // Initialized before use.
   size_t capacity_;
@@ -209,10 +209,10 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   // Dummy head of LRU list.
   // lru.prev is newest entry, lru.next is oldest entry.
   // LRU contains items which can be evicted, ie reference only by cache
-  NVMHandle lru_;
+  TransientHandle lru_;
 
   // Pointer to head of low-pri pool in LRU list.
-  NVMHandle* lru_low_pri_;
+  TransientHandle* lru_low_pri_;
 
   // ------------^^^^^^^^^^^^^-----------
   // Not frequently modified data members
@@ -225,7 +225,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   // ------------------------------------
   // Frequently modified data members
   // ------------vvvvvvvvvvvvv-----------
-  // NVMHandleTable table_;
+  // TransientHandleTable table_;
 
   // Memory size for entries residing in the cache
   size_t usage_;

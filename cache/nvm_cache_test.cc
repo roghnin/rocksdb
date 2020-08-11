@@ -60,10 +60,10 @@ class NVMCacheTest : public testing::Test {
 
   void ValidateLRUList(std::vector<std::string> keys,
                        size_t num_high_pri_pool_keys = 0) {
-    NVMHandle* lru;
-    NVMHandle* lru_low_pri;
+    TransientHandle* lru;
+    TransientHandle* lru_low_pri;
     cache_->TEST_GetLRUList(&lru, &lru_low_pri);
-    NVMHandle* iter = lru;
+    TransientHandle* iter = lru;
     bool in_high_pri_pool = false;
     size_t high_pri_pool_keys = 0;
     if (iter == lru_low_pri) {
