@@ -1723,6 +1723,9 @@ stats_history_test: $(OBJ_DIR)/monitoring/stats_history_test.o $(TEST_LIBRARY) $
 lru_cache_test: $(OBJ_DIR)/cache/lru_cache_test.o $(TEST_LIBRARY) $(LIBRARY)
 	$(AM_LINK)
 
+nvm_cache_test: $(OBJ_DIR)/cache/nvm_cache_test.o $(TEST_LIBRARY) $(LIBRARY)
+	$(AM_LINK)
+
 range_del_aggregator_test: $(OBJ_DIR)/db/range_del_aggregator_test.o $(TEST_LIBRARY) $(LIBRARY)
 	$(AM_LINK)
 
