@@ -16,6 +16,10 @@
 
 #include "util/mutexlock.h"
 
+#define PHEAP_PATH "/dev/shm/nvm_cache"
+
+using namespace pmem::obj;
+
 namespace ROCKSDB_NAMESPACE {
 
 NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
@@ -31,11 +35,18 @@ NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
       lru_usage_(0),
       mutex_(use_adaptive_mutex) {
   set_metadata_charge_policy(metadata_charge_policy);
-  // Make empty circular linked list
-  lru_.next = &lru_;
-  lru_.prev = &lru_;
-  lru_low_pri_ = &lru_;
-  SetCapacity(capacity);
+  // TODO
+
+  // Set up persistent memory pool (pop)
+  if (access(PHEAP_PATH, F_OK) != 0){
+    pop_ = pool<PersistentRoot>::create(PHEAP_PATH, "nvm_cache_pool", PMEMOBJ_MIN_POOL, S_IRWXU);
+  } else {
+    pop_ = pool<PersistentRoot>::open(PHEAP_PATH, "nvm_cache_pool");
+  }
+
+  // get hashmap from root.
+  persistent_hashmap_ = pop_.get_root()->persistent_hashmap;
+
 }
 
 void NVMCacheShard::EraseUnRefEntries() {
@@ -177,7 +188,7 @@ Status NVMCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              void (*deleter)(const Slice& key, void* value),
                              Cache::Handle** handle, Cache::Priority priority) {
   Status s = Status::OK();
-  // TODO
+  
   return s;
 }
 

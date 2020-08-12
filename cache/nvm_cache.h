@@ -16,8 +16,11 @@
 #include "port/port.h"
 #include "util/autovector.h"
 
+#include <unistd.h>
 #include <libpmemobj++/p.hpp>
 #include <libpmemobj++/container/concurrent_hash_map.hpp>
+#include <libpmemobj++/pool.hpp>
+#include <libpmemobj++/persistent_ptr.hpp>
 
 using namespace pmem::obj;
 
@@ -135,6 +138,11 @@ struct PersistentEntry{
   TransientHandle* transient_handle;
 };
 
+struct PersistentRoot{
+  p<concurrent_hash_map<uint32_t, p<PersistentEntry>>> persistent_hashmap;
+  p<PersistentEntry> persistnet_lru_list;
+};
+
 // A single shard of sharded cache.
 class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
  public:
@@ -227,6 +235,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   // Pointer to head of low-pri pool in LRU list.
   TransientHandle* lru_low_pri_;
 
+  pool<PersistentRoot> pop_;
+
   // ------------^^^^^^^^^^^^^-----------
   // Not frequently modified data members
   // ------------------------------------
@@ -241,7 +251,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   // TransientHandleTable table_;
 
   // This is a concurrent persistent container provided by PMDK.
-  concurrent_hash_map<uint32_t, p<PersistentEntry>> persistent_hashmap;
+  p<concurrent_hash_map<uint32_t, p<PersistentEntry>>> persistent_hashmap_;
 
   // Memory size for entries residing in the cache
   size_t usage_;
