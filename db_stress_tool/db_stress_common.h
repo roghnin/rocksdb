@@ -179,6 +179,7 @@ DECLARE_int32(ingest_external_file_one_in);
 DECLARE_int32(ingest_external_file_width);
 DECLARE_int32(compact_files_one_in);
 DECLARE_int32(compact_range_one_in);
+DECLARE_int32(mark_for_compaction_one_file_in);
 DECLARE_int32(flush_one_in);
 DECLARE_int32(pause_background_one_in);
 DECLARE_int32(compact_range_width);
@@ -221,6 +222,7 @@ DECLARE_bool(level_compaction_dynamic_level_bytes);
 DECLARE_int32(verify_checksum_one_in);
 DECLARE_int32(verify_db_one_in);
 DECLARE_int32(continuous_verification_interval);
+DECLARE_int32(get_property_one_in);
 
 #ifndef ROCKSDB_LITE
 DECLARE_bool(use_blob_db);

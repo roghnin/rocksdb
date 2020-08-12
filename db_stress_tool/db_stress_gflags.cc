@@ -500,6 +500,12 @@ DEFINE_int32(compact_range_one_in, 0,
              "If non-zero, then CompactRange() will be called once for every N "
              "operations on average.  0 indicates CompactRange() is disabled.");
 
+DEFINE_int32(mark_for_compaction_one_file_in, 0,
+             "A `TablePropertiesCollectorFactory` will be registered, which "
+             "creates a `TablePropertiesCollector` with `NeedCompact()` "
+             "returning true once for every N files on average. 0 or negative "
+             "mean `NeedCompact()` always returns false.");
+
 DEFINE_int32(flush_one_in, 0,
              "If non-zero, then Flush() will be called once for every N ops "
              "on average.  0 indicates calls to Flush() are disabled.");
@@ -692,6 +698,11 @@ DEFINE_int32(approximate_size_one_in, 64,
 
 DEFINE_int32(read_fault_one_in, 1000,
             "On non-zero, enables fault injection on read");
+
+DEFINE_int32(get_property_one_in, 1000,
+             "If non-zero, then DB::GetProperty() will be called to get various"
+             " properties for every N ops on average. 0 indicates that"
+             " GetProperty() will be not be called.");
 
 DEFINE_bool(sync_fault_injection, false,
             "If true, FaultInjectionTestFS will be used for write operations, "
