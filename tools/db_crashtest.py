@@ -66,6 +66,7 @@ default_params = {
     # Temporarily disable hash index
     "index_type": lambda: random.choice([0, 0, 0, 2, 2, 3]),
     "iterpercent": 10,
+    "mark_for_compaction_one_file_in": lambda: 10 * random.randint(0, 1),
     "max_background_compactions": 20,
     "max_bytes_for_level_base": 10485760,
     "max_key": 100000000,
@@ -127,7 +128,8 @@ default_params = {
     "max_key_len": 3,
     "key_len_percent_dist": "1,30,69",
     "read_fault_one_in": lambda: random.choice([0, 1000]),
-    "sync_fault_injection": False
+    "sync_fault_injection": False,
+    "get_property_one_in": 1000000,
 }
 
 _TEST_DIR_ENV_VAR = 'TEST_TMPDIR'
