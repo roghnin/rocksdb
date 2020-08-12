@@ -17,6 +17,7 @@
 #include "util/autovector.h"
 
 #include <libpmemobj++/p.hpp>
+#include <libpmemobj++/container/concurrent_hash_map.hpp>
 
 using namespace pmem::obj;
 
@@ -120,6 +121,18 @@ struct TransientHandle {
     }
     return charge + meta_charge;
   }
+};
+
+struct PersistentEntry{
+  // persistent fields:
+  size_t key_size;
+  size_t val_size;
+  p<char> key;
+  p<char> val;
+
+  // transient fields, validated by era number:
+  size_t era = 0;
+  TransientHandle* transient_handle;
 };
 
 // A single shard of sharded cache.
@@ -226,6 +239,9 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   // Frequently modified data members
   // ------------vvvvvvvvvvvvv-----------
   // TransientHandleTable table_;
+
+  // This is a concurrent persistent container provided by PMDK.
+  concurrent_hash_map<uint32_t, p<PersistentEntry>> persistent_hashmap;
 
   // Memory size for entries residing in the cache
   size_t usage_;
