@@ -212,7 +212,6 @@ Status NVMCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
     });
   }
   
-
   return s;
 }
 

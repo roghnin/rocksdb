@@ -597,7 +597,6 @@ ifdef ASSERT_STATUS_CHECKED
 		io_posix_test \
 		iostats_context_test \
 		memkind_kmem_allocator_test \
-		memkind_pmem_allocator_test \
 		merger_test \
 		mock_env_test \
 		object_registry_test \
@@ -1286,9 +1285,6 @@ arena_test: $(OBJ_DIR)/memory/arena_test.o $(TEST_LIBRARY) $(LIBRARY)
 	$(AM_LINK)
 
 memkind_kmem_allocator_test: memory/memkind_kmem_allocator_test.o $(TEST_LIBRARY) $(LIBRARY)
-	$(AM_LINK)
-
-memkind_pmem_allocator_test: memory/memkind_pmem_allocator_test.o $(TEST_LIBRARY) $(LIBRARY)
 	$(AM_LINK)
 
 autovector_test: $(OBJ_DIR)/util/autovector_test.o $(TEST_LIBRARY) $(LIBRARY)
