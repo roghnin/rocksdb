@@ -196,6 +196,22 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              void (*deleter)(const Slice& key, void* value),
                              Cache::Handle** handle, Cache::Priority priority) {
   Status s = Status::OK();
+  TransientHandle* e = reinterpret_cast<TransientHandle*>(
+      new char[sizeof(TransientHandle) - 1 + key.size()]);
+  
+  e->value = value;
+  e->deleter = deleter;
+  e->charge = charge;
+  e->key_length = key.size();
+  e->flags = 0;
+  e->hash = hash;
+  e->refs = 0;
+  e->next = e->prev = nullptr;
+  e->SetInCache(true);
+  e->SetPriority(priority);
+  e->position = CachePosition::kTransient;
+  memcpy(e->key_data, key.data(), key.size());
+  // TODO: insertion into transient tier
   
   // insertion into persistent tier
   {
@@ -203,16 +219,22 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
 
     // TODO: evict from LRU
     // TODO: calculate charge and refuse insert if cache is full
-    po::transaction::run(pop_, [&]{
+    po::transaction::run(pop_, [&, e] {
       auto p_entry = po::make_persistent<PersistentEntry>();
       p_entry->key_size = key.size();
       p_entry->key = po::make_persistent<char[]>(key.size());
       pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
+      // TODO: memcpy the val into NVM and link to p_entry.
       persistent_hashmap_->insert(PersistTierHashTable::value_type(hash,
         po::make_persistent<PersistentEntry>()));
+      // TODO: the following stuff can be moved out of the transaction, but
+      // is currently stuck due to scope of p_entry and/or capture by value.
+      p_entry->trans_handle = e;
+      e->p_key = p_entry->key.get();
+      // TODO: uncomment this line when we have memcpy of val.
+      // e->p_val = p_entry_raw->val.get();
     });
   }
-  
   return s;
 }
 

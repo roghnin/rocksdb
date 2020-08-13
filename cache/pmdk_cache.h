@@ -29,6 +29,11 @@ namespace po = pmem::obj;
 
 namespace ROCKSDB_NAMESPACE {
 
+enum class CachePosition{
+  kTransient,
+  kPersist
+};
+
 // This will be the transient handle of the cache.
 struct TransientHandle {
   void* value;
@@ -36,12 +41,16 @@ struct TransientHandle {
   TransientHandle* next_hash;
   TransientHandle* next;
   TransientHandle* prev;
+  void* p_key;
+  void* p_val;
   size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
   // The hash of key(). Used for fast sharding and comparisons.
   uint32_t hash;
   // The number of external refs to this entry. The cache itself is not counted.
   uint32_t refs;
+
+  CachePosition position;
 
   enum Flags : uint8_t {
     // Whether this entry is referenced by the hash table.
@@ -138,14 +147,14 @@ struct PersistentEntry{
 
   size_t era = 0;
   // transient fields, validated by era number:
-  TransientHandle* transient_handle;
+  TransientHandle* trans_handle;
 };
 
 using PersistTierHashTable = po::concurrent_hash_map<po::p<uint32_t>, po::persistent_ptr<PersistentEntry>>;
 
 struct PersistentRoot{
   po::persistent_ptr<PersistTierHashTable> persistent_hashmap;
-  po::persistent_ptr<PersistentEntry> persistnet_lru_list;
+  po::persistent_ptr<PersistentEntry> persistent_lru_list;
 };
 
 // A single shard of sharded cache.
