@@ -149,14 +149,14 @@ struct PersistentRoot{
 };
 
 // A single shard of sharded cache.
-class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
+class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
  public:
-  NVMCacheShard(size_t capacity, bool strict_capacity_limit,
+  PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                 double high_pri_pool_ratio, bool use_adaptive_mutex,
                 CacheMetadataChargePolicy metadata_charge_policy);
-  virtual ~NVMCacheShard() override = default;
+  virtual ~PMDKCacheShard() override = default;
 
-  // Separate from constructor so caller can easily make an array of NVMCache
+  // Separate from constructor so caller can easily make an array of PMDKCache
   // if current usage is more than new capacity, the function will attempt to
   // free the needed space
   virtual void SetCapacity(size_t capacity) override;
@@ -270,20 +270,20 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   mutable port::Mutex mutex_;
 };
 
-class NVMCache
+class PMDKCache
 #ifdef NDEBUG
     final
 #endif
     : public ShardedCache {
  public:
-  NVMCache(size_t capacity, int num_shard_bits, bool strict_capacity_limit,
+  PMDKCache(size_t capacity, int num_shard_bits, bool strict_capacity_limit,
            double high_pri_pool_ratio,
            std::shared_ptr<MemoryAllocator> memory_allocator = nullptr,
            bool use_adaptive_mutex = kDefaultToAdaptiveMutex,
            CacheMetadataChargePolicy metadata_charge_policy =
                kDontChargeCacheMetadata);
-  virtual ~NVMCache();
-  virtual const char* Name() const override { return "NVMCache"; }
+  virtual ~PMDKCache();
+  virtual const char* Name() const override { return "PMDKCache"; }
   virtual CacheShard* GetShard(int shard) override;
   virtual const CacheShard* GetShard(int shard) const override;
   virtual void* Value(Handle* handle) override;
@@ -297,7 +297,7 @@ class NVMCache
   double GetHighPriPoolRatio();
 
  private:
-  NVMCacheShard* shards_ = nullptr;
+  PMDKCacheShard* shards_ = nullptr;
   int num_shards_ = 0;
 };
 

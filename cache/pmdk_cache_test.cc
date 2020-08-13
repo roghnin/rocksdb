@@ -3,7 +3,7 @@
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
 
-#include "cache/nvm_cache.h"
+#include "cache/pmdk_cache.h"
 
 #include <string>
 #include <vector>
@@ -12,14 +12,14 @@
 
 namespace ROCKSDB_NAMESPACE {
 
-class NVMCacheTest : public testing::Test {
+class PMDKCacheTest : public testing::Test {
  public:
-  NVMCacheTest() {}
-  ~NVMCacheTest() override { DeleteCache(); }
+  PMDKCacheTest() {}
+  ~PMDKCacheTest() override { DeleteCache(); }
 
   void DeleteCache() {
     if (cache_ != nullptr) {
-      cache_->~NVMCacheShard();
+      cache_->~PMDKCacheShard();
       port::cacheline_aligned_free(cache_);
       cache_ = nullptr;
     }
@@ -28,9 +28,9 @@ class NVMCacheTest : public testing::Test {
   void NewCache(size_t capacity, double high_pri_pool_ratio = 0.0,
                 bool use_adaptive_mutex = kDefaultToAdaptiveMutex) {
     DeleteCache();
-    cache_ = reinterpret_cast<NVMCacheShard*>(
-        port::cacheline_aligned_alloc(sizeof(NVMCacheShard)));
-    new (cache_) NVMCacheShard(capacity, false /*strict_capcity_limit*/,
+    cache_ = reinterpret_cast<PMDKCacheShard*>(
+        port::cacheline_aligned_alloc(sizeof(PMDKCacheShard)));
+    new (cache_) PMDKCacheShard(capacity, false /*strict_capcity_limit*/,
                                high_pri_pool_ratio, use_adaptive_mutex,
                                kDontChargeCacheMetadata);
   }
@@ -88,10 +88,10 @@ class NVMCacheTest : public testing::Test {
   }
 
  private:
-  NVMCacheShard* cache_ = nullptr;
+  PMDKCacheShard* cache_ = nullptr;
 };
 
-TEST_F(NVMCacheTest, BasicLRU) {
+TEST_F(PMDKCacheTest, BasicLRU) {
   NewCache(5);
   for (char ch = 'a'; ch <= 'e'; ch++) {
     Insert(ch);
@@ -117,7 +117,7 @@ TEST_F(NVMCacheTest, BasicLRU) {
   ValidateLRUList({"e", "z", "d", "u", "v"});
 }
 
-TEST_F(NVMCacheTest, MidpointInsertion) {
+TEST_F(PMDKCacheTest, MidpointInsertion) {
   // Allocate 2 cache entries to high-pri pool.
   NewCache(5, 0.45);
 
@@ -140,7 +140,7 @@ TEST_F(NVMCacheTest, MidpointInsertion) {
   ValidateLRUList({"c", "x", "y", "d", "z"}, 2);
 }
 
-TEST_F(NVMCacheTest, EntriesWithPriority) {
+TEST_F(PMDKCacheTest, EntriesWithPriority) {
   // Allocate 2 cache entries to high-pri pool.
   NewCache(5, 0.45);
 

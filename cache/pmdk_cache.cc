@@ -7,7 +7,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 
-#include "cache/nvm_cache.h"
+#include "cache/pmdk_cache.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -16,13 +16,14 @@
 
 #include "util/mutexlock.h"
 
-#define PHEAP_PATH "/dev/shm/nvm_cache"
+// TODO: make this a run-time variable
+#define PHEAP_PATH "/dev/shm/pmdk_cache"
 
 
 
 namespace ROCKSDB_NAMESPACE {
 
-NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
+PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                              double high_pri_pool_ratio,
                              bool use_adaptive_mutex,
                              CacheMetadataChargePolicy metadata_charge_policy)
@@ -39,7 +40,7 @@ NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
 
   // Set up persistent memory pool (pop)
   if (access(PHEAP_PATH, F_OK) != 0){
-    pop_ = po::pool<PersistentRoot>::create(PHEAP_PATH, "nvm_cache_pool", PMEMOBJ_MIN_POOL, S_IRWXU);
+    pop_ = po::pool<PersistentRoot>::create(PHEAP_PATH, "pmdk_cache_pool", PMEMOBJ_MIN_POOL, S_IRWXU);
     PersistentRoot* root = pop_.root().get();
     po::transaction::run(pop_, [&, root] {
       root->persistent_hashmap = po::make_persistent<PersistTierHashTable>();
@@ -47,7 +48,7 @@ NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
     });
     
   } else {
-    pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "nvm_cache_pool");
+    pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "pmdk_cache_pool");
     persistent_hashmap_ = pop_.root()->persistent_hashmap.get();
   }
 
@@ -56,33 +57,33 @@ NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
 
 }
 
-void NVMCacheShard::EraseUnRefEntries() {
+void PMDKCacheShard::EraseUnRefEntries() {
   // TODO
 }
 
-void NVMCacheShard::ApplyToAllCacheEntries(void (*callback)(void*, size_t),
+void PMDKCacheShard::ApplyToAllCacheEntries(void (*callback)(void*, size_t),
                                            bool thread_safe) {
   // TODO
 }
 
-void NVMCacheShard::TEST_GetLRUList(TransientHandle** lru, TransientHandle** lru_low_pri) {
+void PMDKCacheShard::TEST_GetLRUList(TransientHandle** lru, TransientHandle** lru_low_pri) {
   MutexLock l(&mutex_);
   *lru = &lru_;
   *lru_low_pri = lru_low_pri_;
 }
 
-size_t NVMCacheShard::TEST_GetLRUSize() {
+size_t PMDKCacheShard::TEST_GetLRUSize() {
   size_t lru_size = 0;
   // TODO
   return lru_size;
 }
 
-double NVMCacheShard::GetHighPriPoolRatio() {
+double PMDKCacheShard::GetHighPriPoolRatio() {
   MutexLock l(&mutex_);
   return high_pri_pool_ratio_;
 }
 
-void NVMCacheShard::LRU_Remove(TransientHandle* e) {
+void PMDKCacheShard::LRU_Remove(TransientHandle* e) {
   assert(e->next != nullptr);
   assert(e->prev != nullptr);
   if (lru_low_pri_ == e) {
@@ -100,7 +101,7 @@ void NVMCacheShard::LRU_Remove(TransientHandle* e) {
   }
 }
 
-void NVMCacheShard::LRU_Insert(TransientHandle* e) {
+void PMDKCacheShard::LRU_Insert(TransientHandle* e) {
   assert(e->next == nullptr);
   assert(e->prev == nullptr);
   size_t total_charge = e->CalcTotalCharge(metadata_charge_policy_);
@@ -126,7 +127,7 @@ void NVMCacheShard::LRU_Insert(TransientHandle* e) {
   lru_usage_ += total_charge;
 }
 
-void NVMCacheShard::MaintainPoolSize() {
+void PMDKCacheShard::MaintainPoolSize() {
   while (high_pri_pool_usage_ > high_pri_pool_capacity_) {
     // Overflow last entry in high-pri pool to low-pri pool.
     lru_low_pri_ = lru_low_pri_->next;
@@ -139,12 +140,12 @@ void NVMCacheShard::MaintainPoolSize() {
   }
 }
 
-void NVMCacheShard::EvictFromLRU(size_t charge,
+void PMDKCacheShard::EvictFromLRU(size_t charge,
                                  autovector<TransientHandle*>* deleted) {
   // TODO
 }
 
-void NVMCacheShard::SetCapacity(size_t capacity) {
+void PMDKCacheShard::SetCapacity(size_t capacity) {
   autovector<TransientHandle*> last_reference_list;
   {
     MutexLock l(&mutex_);
@@ -159,17 +160,17 @@ void NVMCacheShard::SetCapacity(size_t capacity) {
   }
 }
 
-void NVMCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit) {
+void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit) {
   MutexLock l(&mutex_);
   strict_capacity_limit_ = strict_capacity_limit;
 }
 
-Cache::Handle* NVMCacheShard::Lookup(const Slice& key, uint32_t hash) {
+Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash) {
   // TODO
   return nullptr;
 }
 
-bool NVMCacheShard::Ref(Cache::Handle* h) {
+bool PMDKCacheShard::Ref(Cache::Handle* h) {
   TransientHandle* e = reinterpret_cast<TransientHandle*>(h);
   MutexLock l(&mutex_);
   // To create another reference - entry must be already externally referenced
@@ -178,19 +179,19 @@ bool NVMCacheShard::Ref(Cache::Handle* h) {
   return true;
 }
 
-void NVMCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
+void PMDKCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
   MutexLock l(&mutex_);
   high_pri_pool_ratio_ = high_pri_pool_ratio;
   high_pri_pool_capacity_ = capacity_ * high_pri_pool_ratio_;
   MaintainPoolSize();
 }
 
-bool NVMCacheShard::Release(Cache::Handle* handle, bool force_erase) {
+bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
   // TODO
   return true;
 }
 
-Status NVMCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
+Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              size_t charge,
                              void (*deleter)(const Slice& key, void* value),
                              Cache::Handle** handle, Cache::Priority priority) {
@@ -215,22 +216,22 @@ Status NVMCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   return s;
 }
 
-void NVMCacheShard::Erase(const Slice& key, uint32_t hash) {
+void PMDKCacheShard::Erase(const Slice& key, uint32_t hash) {
   // TODO
 }
 
-size_t NVMCacheShard::GetUsage() const {
+size_t PMDKCacheShard::GetUsage() const {
   MutexLock l(&mutex_);
   return usage_;
 }
 
-size_t NVMCacheShard::GetPinnedUsage() const {
+size_t PMDKCacheShard::GetPinnedUsage() const {
   MutexLock l(&mutex_);
   assert(usage_ >= lru_usage_);
   return usage_ - lru_usage_;
 }
 
-std::string NVMCacheShard::GetPrintableOptions() const {
+std::string PMDKCacheShard::GetPrintableOptions() const {
   const int kBufferSize = 200;
   char buffer[kBufferSize];
   {
@@ -241,7 +242,7 @@ std::string NVMCacheShard::GetPrintableOptions() const {
   return std::string(buffer);
 }
 
-NVMCache::NVMCache(size_t capacity, int num_shard_bits,
+PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
                    bool strict_capacity_limit, double high_pri_pool_ratio,
                    std::shared_ptr<MemoryAllocator> allocator,
                    bool use_adaptive_mutex,
@@ -249,47 +250,47 @@ NVMCache::NVMCache(size_t capacity, int num_shard_bits,
     : ShardedCache(capacity, num_shard_bits, strict_capacity_limit,
                    std::move(allocator)) {
   num_shards_ = 1 << num_shard_bits;
-  shards_ = reinterpret_cast<NVMCacheShard*>(
-      port::cacheline_aligned_alloc(sizeof(NVMCacheShard) * num_shards_));
+  shards_ = reinterpret_cast<PMDKCacheShard*>(
+      port::cacheline_aligned_alloc(sizeof(PMDKCacheShard) * num_shards_));
   size_t per_shard = (capacity + (num_shards_ - 1)) / num_shards_;
   for (int i = 0; i < num_shards_; i++) {
     new (&shards_[i])
-        NVMCacheShard(per_shard, strict_capacity_limit, high_pri_pool_ratio,
+        PMDKCacheShard(per_shard, strict_capacity_limit, high_pri_pool_ratio,
                       use_adaptive_mutex, metadata_charge_policy);
   }
 }
 
-NVMCache::~NVMCache() {
+PMDKCache::~PMDKCache() {
   if (shards_ != nullptr) {
     assert(num_shards_ > 0);
     for (int i = 0; i < num_shards_; i++) {
-      shards_[i].~NVMCacheShard();
+      shards_[i].~PMDKCacheShard();
     }
     port::cacheline_aligned_free(shards_);
   }
 }
 
-CacheShard* NVMCache::GetShard(int shard) {
+CacheShard* PMDKCache::GetShard(int shard) {
   return reinterpret_cast<CacheShard*>(&shards_[shard]);
 }
 
-const CacheShard* NVMCache::GetShard(int shard) const {
+const CacheShard* PMDKCache::GetShard(int shard) const {
   return reinterpret_cast<CacheShard*>(&shards_[shard]);
 }
 
-void* NVMCache::Value(Handle* handle) {
+void* PMDKCache::Value(Handle* handle) {
   return reinterpret_cast<const TransientHandle*>(handle)->value;
 }
 
-size_t NVMCache::GetCharge(Handle* handle) const {
+size_t PMDKCache::GetCharge(Handle* handle) const {
   return reinterpret_cast<const TransientHandle*>(handle)->charge;
 }
 
-uint32_t NVMCache::GetHash(Handle* handle) const {
+uint32_t PMDKCache::GetHash(Handle* handle) const {
   return reinterpret_cast<const TransientHandle*>(handle)->hash;
 }
 
-void NVMCache::DisownData() {
+void PMDKCache::DisownData() {
 // Do not drop data if compile with ASAN to suppress leak warning.
 #if defined(__clang__)
 #if !defined(__has_feature) || !__has_feature(address_sanitizer)
@@ -304,7 +305,7 @@ void NVMCache::DisownData() {
 #endif  // __clang__
 }
 
-size_t NVMCache::TEST_GetLRUSize() {
+size_t PMDKCache::TEST_GetLRUSize() {
   size_t lru_size_of_all_shards = 0;
   for (int i = 0; i < num_shards_; i++) {
     lru_size_of_all_shards += shards_[i].TEST_GetLRUSize();
@@ -312,7 +313,7 @@ size_t NVMCache::TEST_GetLRUSize() {
   return lru_size_of_all_shards;
 }
 
-double NVMCache::GetHighPriPoolRatio() {
+double PMDKCache::GetHighPriPoolRatio() {
   double result = 0.0;
   if (num_shards_ > 0) {
     result = shards_[0].GetHighPriPoolRatio();
@@ -320,15 +321,15 @@ double NVMCache::GetHighPriPoolRatio() {
   return result;
 }
 
-std::shared_ptr<Cache> NewNVMCache(const LRUCacheOptions& cache_opts) {
-  return NewNVMCache(cache_opts.capacity, cache_opts.num_shard_bits,
+std::shared_ptr<Cache> NewPMDKCache(const LRUCacheOptions& cache_opts) {
+  return NewPMDKCache(cache_opts.capacity, cache_opts.num_shard_bits,
                      cache_opts.strict_capacity_limit,
                      cache_opts.high_pri_pool_ratio,
                      cache_opts.memory_allocator, cache_opts.use_adaptive_mutex,
                      cache_opts.metadata_charge_policy);
 }
 
-std::shared_ptr<Cache> NewNVMCache(
+std::shared_ptr<Cache> NewPMDKCache(
     size_t capacity, int num_shard_bits, bool strict_capacity_limit,
     double high_pri_pool_ratio,
     std::shared_ptr<MemoryAllocator> memory_allocator, bool use_adaptive_mutex,
@@ -343,7 +344,7 @@ std::shared_ptr<Cache> NewNVMCache(
   if (num_shard_bits < 0) {
     num_shard_bits = GetDefaultCacheShardBits(capacity);
   }
-  return std::make_shared<NVMCache>(
+  return std::make_shared<PMDKCache>(
       capacity, num_shard_bits, strict_capacity_limit, high_pri_pool_ratio,
       std::move(memory_allocator), use_adaptive_mutex, metadata_charge_policy);
 }
