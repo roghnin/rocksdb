@@ -16,13 +16,16 @@
 #include "port/port.h"
 #include "util/autovector.h"
 
+// TODO: re-order included headers.
 #include <unistd.h>
 #include <libpmemobj++/p.hpp>
 #include <libpmemobj++/container/concurrent_hash_map.hpp>
 #include <libpmemobj++/pool.hpp>
 #include <libpmemobj++/persistent_ptr.hpp>
+#include <libpmemobj++/make_persistent_array.hpp>
+#include <libpmemobj++/transaction.hpp>
 
-using namespace pmem::obj;
+namespace po = pmem::obj;
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -128,19 +131,21 @@ struct TransientHandle {
 
 struct PersistentEntry{
   // persistent fields:
-  size_t key_size;
-  size_t val_size;
-  p<char> key;
-  p<char> val;
+  po::p<size_t> key_size;
+  po::p<size_t> val_size;
+  po::persistent_ptr<char[]> key;
+  po::persistent_ptr<char[]> val;
 
-  // transient fields, validated by era number:
   size_t era = 0;
+  // transient fields, validated by era number:
   TransientHandle* transient_handle;
 };
 
+using PersistTierHashTable = po::concurrent_hash_map<po::p<uint32_t>, po::persistent_ptr<PersistentEntry>>;
+
 struct PersistentRoot{
-  p<concurrent_hash_map<uint32_t, p<PersistentEntry>>> persistent_hashmap;
-  p<PersistentEntry> persistnet_lru_list;
+  po::persistent_ptr<PersistTierHashTable> persistent_hashmap;
+  po::persistent_ptr<PersistentEntry> persistnet_lru_list;
 };
 
 // A single shard of sharded cache.
@@ -235,7 +240,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   // Pointer to head of low-pri pool in LRU list.
   TransientHandle* lru_low_pri_;
 
-  pool<PersistentRoot> pop_;
+  po::pool<PersistentRoot> pop_;
 
   // ------------^^^^^^^^^^^^^-----------
   // Not frequently modified data members
@@ -251,7 +256,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) NVMCacheShard final : public CacheShard {
   // TransientHandleTable table_;
 
   // This is a concurrent persistent container provided by PMDK.
-  p<concurrent_hash_map<uint32_t, p<PersistentEntry>>> persistent_hashmap_;
+  PersistTierHashTable* persistent_hashmap_;
 
   // Memory size for entries residing in the cache
   size_t usage_;

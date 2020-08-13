@@ -18,7 +18,7 @@
 
 #define PHEAP_PATH "/dev/shm/nvm_cache"
 
-using namespace pmem::obj;
+
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -39,13 +39,20 @@ NVMCacheShard::NVMCacheShard(size_t capacity, bool strict_capacity_limit,
 
   // Set up persistent memory pool (pop)
   if (access(PHEAP_PATH, F_OK) != 0){
-    pop_ = pool<PersistentRoot>::create(PHEAP_PATH, "nvm_cache_pool", PMEMOBJ_MIN_POOL, S_IRWXU);
+    pop_ = po::pool<PersistentRoot>::create(PHEAP_PATH, "nvm_cache_pool", PMEMOBJ_MIN_POOL, S_IRWXU);
+    PersistentRoot* root = pop_.root().get();
+    po::transaction::run(pop_, [&, root] {
+      root->persistent_hashmap = po::make_persistent<PersistTierHashTable>();
+      persistent_hashmap_ = root->persistent_hashmap.get();
+    });
+    
   } else {
-    pop_ = pool<PersistentRoot>::open(PHEAP_PATH, "nvm_cache_pool");
+    pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "nvm_cache_pool");
+    persistent_hashmap_ = pop_.root()->persistent_hashmap.get();
   }
 
   // get hashmap from root.
-  persistent_hashmap_ = pop_.get_root()->persistent_hashmap;
+  
 
 }
 
@@ -189,6 +196,23 @@ Status NVMCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              Cache::Handle** handle, Cache::Priority priority) {
   Status s = Status::OK();
   
+  // insertion into persistent tier
+  {
+    MutexLock l(&mutex_);
+
+    // TODO: evict from LRU
+    // TODO: calculate charge and refuse insert if cache is full
+    po::transaction::run(pop_, [&]{
+      auto p_entry = po::make_persistent<PersistentEntry>();
+      p_entry->key_size = key.size();
+      p_entry->key = po::make_persistent<char[]>(key.size());
+      pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
+      persistent_hashmap_->insert(PersistTierHashTable::value_type(hash,
+        po::make_persistent<PersistentEntry>()));
+    });
+  }
+  
+
   return s;
 }
 
