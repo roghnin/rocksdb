@@ -43,13 +43,13 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     pop_ = po::pool<PersistentRoot>::create(PHEAP_PATH, "pmdk_cache_pool", PMEMOBJ_MIN_POOL, S_IRWXU);
     PersistentRoot* root = pop_.root().get();
     po::transaction::run(pop_, [&, root] {
-      root->persistent_hashmap = po::make_persistent<PersistTierHashTable>();
-      persistent_hashmap_ = root->persistent_hashmap.get();
+      root->persistent_hashtable = po::make_persistent<PersistTierHashTable>();
+      persistent_hashtable_ = root->persistent_hashtable.get();
     });
     
   } else {
     pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "pmdk_cache_pool");
-    persistent_hashmap_ = pop_.root()->persistent_hashmap.get();
+    persistent_hashtable_ = pop_.root()->persistent_hashtable.get();
   }
 
   // get hashmap from root.
@@ -166,8 +166,11 @@ void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit) {
 }
 
 Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash) {
-  // TODO
-  return nullptr;
+  // TODO: lookup transient hash table
+  // lookup transient table:
+  TransientHandle* e = persistent_hashtable_->Lookup(key, hash);
+  // TODO: LRU operations.
+  return reinterpret_cast<Cache::Handle*>(e);
 }
 
 bool PMDKCacheShard::Ref(Cache::Handle* h) {
@@ -212,7 +215,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   e->position = CachePosition::kTransient;
   memcpy(e->key_data, key.data(), key.size());
   // TODO: insertion into transient tier
-  
+
   // insertion into persistent tier
   {
     MutexLock l(&mutex_);
@@ -225,8 +228,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
       p_entry->key = po::make_persistent<char[]>(key.size());
       pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
       // TODO: memcpy the val into NVM and link to p_entry.
-      persistent_hashmap_->insert(PersistTierHashTable::value_type(hash,
-        po::make_persistent<PersistentEntry>()));
+      persistent_hashtable_->Insert(hash, key, p_entry);
       // TODO: the following stuff can be moved out of the transaction, but
       // is currently stuck due to scope of p_entry and/or capture by value.
       p_entry->trans_handle = e;

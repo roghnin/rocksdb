@@ -144,16 +144,53 @@ struct PersistentEntry{
   po::p<size_t> val_size;
   po::persistent_ptr<char[]> key;
   po::persistent_ptr<char[]> val;
+  po::persistent_ptr<PersistentEntry> next_hash = nullptr;
 
   size_t era = 0;
   // transient fields, validated by era number:
   TransientHandle* trans_handle;
 };
 
-using PersistTierHashTable = po::concurrent_hash_map<po::p<uint32_t>, po::persistent_ptr<PersistentEntry>>;
+using PHashTableType = po::concurrent_hash_map<po::p<uint32_t>, po::persistent_ptr<PersistentEntry>>;
+class PersistTierHashTable{
+  po::p<PHashTableType> table_;
+  bool KeyEqual(const char* data, size_t size, po::persistent_ptr<PersistentEntry> entry){
+    if (size != entry->key_size){
+      return false;
+    }
+    return (memcmp(data, entry->key.get(), size) == 0);
+  }
+  po::persistent_ptr<PersistentEntry>* FindPointer(const Slice& key, uint32_t hash){
+    po::persistent_ptr<PersistentEntry>* ptr;
+    PHashTableType::accessor acc;
+    bool res = table_.get_rw().find(acc, hash);
+    if (res){
+      ptr = &acc->second;
+      while(*ptr != nullptr && (!KeyEqual(key.data(), key.size(), (*ptr)))) {
+        ptr = &(*ptr)->next_hash;
+      }
+    } else {
+      table_.get_rw().insert(acc, PHashTableType::value_type(hash, nullptr));
+      ptr = &acc->second;
+    }
+    return ptr;
+  }
+public:
+  po::persistent_ptr<PersistentEntry> Insert(uint32_t hash, const Slice& key, po::persistent_ptr<PersistentEntry> entry){
+    po::persistent_ptr<PersistentEntry>* ptr = FindPointer(key, hash);
+    po::persistent_ptr<PersistentEntry> old = *ptr;
+    entry->next_hash = (old == nullptr ? nullptr : old->next_hash);
+    *ptr = entry;
+    return old;
+  }
+  TransientHandle* Lookup(const Slice& key, uint32_t hash){
+    return (*FindPointer(key, hash))->trans_handle;
+  }
+  // TODO: Remove
+};
 
 struct PersistentRoot{
-  po::persistent_ptr<PersistTierHashTable> persistent_hashmap;
+  po::persistent_ptr<PersistTierHashTable> persistent_hashtable;
   po::persistent_ptr<PersistentEntry> persistent_lru_list;
 };
 
@@ -265,7 +302,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   // TransientHandleTable table_;
 
   // This is a concurrent persistent container provided by PMDK.
-  PersistTierHashTable* persistent_hashmap_;
+  PersistTierHashTable* persistent_hashtable_;
+  // PHashTableType* persistent_hashtable_;
 
   // Memory size for entries residing in the cache
   size_t usage_;
