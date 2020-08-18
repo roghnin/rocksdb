@@ -51,10 +51,6 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "pmdk_cache_pool");
     persistent_hashtable_ = pop_.root()->persistent_hashtable.get();
   }
-
-  // get hashmap from root.
-  
-
 }
 
 void PMDKCacheShard::EraseUnRefEntries() {
@@ -165,7 +161,8 @@ void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit) {
   strict_capacity_limit_ = strict_capacity_limit;
 }
 
-Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash) {
+Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
+                                      void* (*pack)(const Slice& slice)) {
   // TODO: lookup transient hash table
   // lookup transient table:
   TransientHandle* e = persistent_hashtable_->Lookup(key, hash);
@@ -197,7 +194,8 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
 Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              size_t charge,
                              void (*deleter)(const Slice& key, void* value),
-                             Cache::Handle** handle, Cache::Priority priority) {
+                             Cache::Handle** handle, Cache::Priority priority,
+                             const Slice& (*unpack)(void* packed)) {
   Status s = Status::OK();
   TransientHandle* e = reinterpret_cast<TransientHandle*>(
       new char[sizeof(TransientHandle) - 1 + key.size()]);

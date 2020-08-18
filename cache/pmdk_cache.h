@@ -218,8 +218,10 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
                         size_t charge,
                         void (*deleter)(const Slice& key, void* value),
                         Cache::Handle** handle,
-                        Cache::Priority priority) override;
-  virtual Cache::Handle* Lookup(const Slice& key, uint32_t hash) override;
+                        Cache::Priority priority,
+                        const Slice& (*unpack)(void* value) = nullptr) override;
+  virtual Cache::Handle* Lookup(const Slice& key, uint32_t hash,
+                                 void* (*pack)(const Slice& value) = nullptr) override;
   virtual bool Ref(Cache::Handle* handle) override;
   virtual bool Release(Cache::Handle* handle,
                        bool force_erase = false) override;

@@ -193,10 +193,12 @@ class Cache {
   //
   // When the inserted entry is no longer needed, the key and
   // value will be passed to "deleter".
+  // TODO: add description about pack and unpack.
   virtual Status Insert(const Slice& key, void* value, size_t charge,
                         void (*deleter)(const Slice& key, void* value),
                         Handle** handle = nullptr,
-                        Priority priority = Priority::LOW) = 0;
+                        Priority priority = Priority::LOW,
+                        const Slice& (*unpack)(void* value) = nullptr) = 0;
 
   // If the cache has no mapping for "key", returns nullptr.
   //
@@ -205,7 +207,9 @@ class Cache {
   // longer needed.
   // If stats is not nullptr, relative tickers could be used inside the
   // function.
-  virtual Handle* Lookup(const Slice& key, Statistics* stats = nullptr) = 0;
+  // TODO: add description about pack and unpack.
+  virtual Handle* Lookup(const Slice& key, Statistics* stats = nullptr,
+                            void* (*pack)(const Slice& value) = nullptr) = 0;
 
   // Increments the reference count for the handle if it refers to an entry in
   // the cache. Returns true if refcount was incremented; otherwise, returns
