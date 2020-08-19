@@ -36,7 +36,6 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
       lru_usage_(0),
       mutex_(use_adaptive_mutex) {
   set_metadata_charge_policy(metadata_charge_policy);
-  // TODO
 
   // Set up persistent memory pool (pop)
   if (access(PHEAP_PATH, F_OK) != 0){
@@ -215,17 +214,20 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   // TODO: insertion into transient tier
 
   // insertion into persistent tier
+  const Slice unpacked_val = unpack(value);
   {
     MutexLock l(&mutex_);
 
     // TODO: evict from LRU
     // TODO: calculate charge and refuse insert if cache is full
-    po::transaction::run(pop_, [&, e] {
+    po::transaction::run(pop_, [&, e, unpacked_val] {
       auto p_entry = po::make_persistent<PersistentEntry>();
       p_entry->key_size = key.size();
       p_entry->key = po::make_persistent<char[]>(key.size());
+      p_entry->val_size = unpacked_val.size();
+      p_entry->val = po::make_persistent<char[]>(unpacked_val.size());
       pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
-      // TODO: memcpy the val into NVM and link to p_entry.
+      pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
       persistent_hashtable_->Insert(hash, key, p_entry);
       // TODO: the following stuff can be moved out of the transaction, but
       // is currently stuck due to scope of p_entry and/or capture by value.
