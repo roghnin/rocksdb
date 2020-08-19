@@ -185,6 +185,7 @@ public:
         new char[sizeof(TransientHandle) - 1 + key.size()]);
       ret->value = target->val.get();
       // TODO: take care of deleter in transient handle.
+      target->trans_handle = ret;
     }
     return ret;
   }
