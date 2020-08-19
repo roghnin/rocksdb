@@ -29,28 +29,21 @@ namespace po = pmem::obj;
 
 namespace ROCKSDB_NAMESPACE {
 
-enum class CachePosition{
-  kTransient,
-  kPersist
-};
-
 // This will be the transient handle of the cache.
+// TODO: maybe we can have fixed-size keys, as they're always built from persistent entry?
+// or, maybe we don't even need a key field in the handle.
 struct TransientHandle {
   void* value;
   void (*deleter)(const Slice&, void* value);
   TransientHandle* next_hash;
   TransientHandle* next;
   TransientHandle* prev;
-  void* p_key;
-  void* p_val;
   size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
   // The hash of key(). Used for fast sharding and comparisons.
   uint32_t hash;
   // The number of external refs to this entry. The cache itself is not counted.
   uint32_t refs;
-
-  CachePosition position;
 
   enum Flags : uint8_t {
     // Whether this entry is referenced by the hash table.
@@ -148,7 +141,7 @@ struct PersistentEntry{
 
   size_t era = 0;
   // transient fields, validated by era number:
-  TransientHandle* trans_handle;
+  TransientHandle* trans_handle = nullptr;
 };
 
 using PHashTableType = po::concurrent_hash_map<po::p<uint32_t>, po::persistent_ptr<PersistentEntry>>;
@@ -184,7 +177,16 @@ public:
     return old;
   }
   TransientHandle* Lookup(const Slice& key, uint32_t hash){
-    return (*FindPointer(key, hash))->trans_handle;
+    po::persistent_ptr<PersistentEntry> target = (*FindPointer(key, hash));
+    TransientHandle* ret = target->trans_handle;
+    if (!ret){
+      // build a TransientHandle.
+      ret = reinterpret_cast<TransientHandle*>(
+        new char[sizeof(TransientHandle) - 1 + key.size()]);
+      ret->value = target->val.get();
+      // TODO: take care of deleter in transient handle.
+    }
+    return ret;
   }
   // TODO: Remove
 };

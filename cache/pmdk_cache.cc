@@ -209,7 +209,6 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   e->next = e->prev = nullptr;
   e->SetInCache(true);
   e->SetPriority(priority);
-  e->position = CachePosition::kTransient;
   memcpy(e->key_data, key.data(), key.size());
   // TODO: insertion into transient tier
 
@@ -229,12 +228,6 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
       pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
       pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
       persistent_hashtable_->Insert(hash, key, p_entry);
-      // TODO: the following stuff can be moved out of the transaction, but
-      // is currently stuck due to scope of p_entry and/or capture by value.
-      p_entry->trans_handle = e;
-      e->p_key = p_entry->key.get();
-      // TODO: uncomment this line when we have memcpy of val.
-      // e->p_val = p_entry_raw->val.get();
     });
   }
   return s;
