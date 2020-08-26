@@ -135,13 +135,32 @@ struct PersistentEntry{
   // persistent fields:
   po::p<size_t> key_size;
   po::p<size_t> val_size;
+  po::p<size_t> persist_charge;
   po::persistent_ptr<char[]> key;
   po::persistent_ptr<char[]> val;
   po::persistent_ptr<PersistentEntry> next_hash = nullptr;
+  po::persistent_ptr<PersistentEntry> next_lru = nullptr;
+  po::persistent_ptr<PersistentEntry> prev_lru = nullptr;
 
   size_t era = 0;
-  // transient fields, validated by era number:
+  // transient fields, validated with era number:
   TransientHandle* trans_handle = nullptr;
+
+  void Free(){
+    // TODO:
+    // free key, val, trans_handle, the transient "coat" (Block or BlockContent) of val, and this.
+  }
+  bool InCache(){
+    // TODO
+    return true;
+  }
+  bool HasRefs(){
+    // TODO: get data from trans_handle.
+    return true;
+  }
+  void SetInCache(bool x){
+    // TODO
+  }
 };
 
 using PHashTableType = po::concurrent_hash_map<po::p<uint32_t>, po::persistent_ptr<PersistentEntry>>;
@@ -169,7 +188,8 @@ class PersistTierHashTable{
     return ptr;
   }
 public:
-  po::persistent_ptr<PersistentEntry> Insert(uint32_t hash, const Slice& key, po::persistent_ptr<PersistentEntry> entry){
+  po::persistent_ptr<PersistentEntry> Insert(
+      uint32_t hash, const Slice& key, po::persistent_ptr<PersistentEntry> entry){
     po::persistent_ptr<PersistentEntry>* ptr = FindPointer(key, hash);
     po::persistent_ptr<PersistentEntry> old = *ptr;
     entry->next_hash = (old == nullptr ? nullptr : old->next_hash);
@@ -189,7 +209,14 @@ public:
     }
     return ret;
   }
-  // TODO: Remove
+  PersistentEntry* Remove(const Slice& key, uint32_t hash){
+    // TODO
+    // this may only be used by Erase().
+  }
+  PersistentEntry* Remove(PersistentEntry* e){
+    // TODO
+    // this is used by EvictFromLRU(). consider having hash persisted in PersistentEntry.
+  }
 };
 
 struct PersistentRoot{
@@ -254,8 +281,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   double GetHighPriPoolRatio();
 
  private:
-  void LRU_Remove(TransientHandle* e);
-  void LRU_Insert(TransientHandle* e);
+  void LRU_Remove(PersistentEntry* e);
+  void LRU_Insert(PersistentEntry* e);
 
   // Overflow the last entry in high-pri pool to low-pri pool until size of
   // high-pri pool is no larger than the size specify by high_pri_pool_pct.
@@ -265,7 +292,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   // to hold (usage_ + charge) is freed or the lru list is empty
   // This function is not thread safe - it needs to be executed while
   // holding the mutex_
-  void EvictFromLRU(size_t charge, autovector<TransientHandle*>* deleted);
+  void EvictFromLRU(size_t charge, autovector<PersistentEntry*>* deleted);
 
   // Initialized before use.
   size_t capacity_;
@@ -283,10 +310,10 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   // Remember the value to avoid recomputing each time.
   double high_pri_pool_capacity_;
 
-  // Dummy head of LRU list.
-  // lru.prev is newest entry, lru.next is oldest entry.
+  // Dummy head of persistent LRU list.
+  // lru->prev_lru is newest entry, lru->next_lru is oldest entry.
   // LRU contains items which can be evicted, ie reference only by cache
-  TransientHandle lru_;
+  PersistentEntry* lru_;
 
   // Pointer to head of low-pri pool in LRU list.
   TransientHandle* lru_low_pri_;
@@ -308,7 +335,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
 
   // This is a concurrent persistent container provided by PMDK.
   PersistTierHashTable* persistent_hashtable_;
-  // PHashTableType* persistent_hashtable_;
+
+  // TODO: recover memory usage and lru usage data after crash, or consider persisting them.
 
   // Memory size for entries residing in the cache
   size_t usage_;
