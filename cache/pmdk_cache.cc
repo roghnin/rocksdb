@@ -116,18 +116,19 @@ void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
   lru_usage_ += e->persist_charge;
 }
 
-void PMDKCacheShard::MaintainPoolSize() {
-  // while (high_pri_pool_usage_ > high_pri_pool_capacity_) {
-  //   // Overflow last entry in high-pri pool to low-pri pool.
-  //   lru_low_pri_ = lru_low_pri_->next;
-  //   assert(lru_low_pri_ != &lru_);
-  //   lru_low_pri_->SetInHighPriPool(false);
-  //   size_t total_charge =
-  //       lru_low_pri_->CalcTotalCharge(metadata_charge_policy_);
-  //   assert(high_pri_pool_usage_ >= total_charge);
-  //   high_pri_pool_usage_ -= total_charge;
-  // }
-  // TODO
+TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<PersistentEntry> e){
+  TransientHandle* ret = e->trans_handle;
+    if (!ret){
+      // build a TransientHandle.
+      ret = reinterpret_cast<TransientHandle*>(
+        new char[sizeof(TransientHandle) - 1 + e->key_size]);
+
+      // TODO: use pack() to pack value.
+      // TODO: take care of deleter in transient handle, if we ever need one.
+      // ret->value = target->val.get();
+      e->trans_handle = ret; // no need to be in transaction. It's transient.
+    }
+    return ret;
 }
 
 void PMDKCacheShard::EvictFromLRU(size_t charge,
@@ -170,12 +171,22 @@ void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit){
 
 Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
                                       void* (*pack)(const Slice& slice)) {
+  
+  MutexLock l(&mutex_);
   // TODO: lookup transient hash table
 
   // lookup persistent table:
-  TransientHandle* e = persistent_hashtable_->Lookup(key, hash)->GetTransientHandle();
-  // TODO: LRU operations.
-  return reinterpret_cast<Cache::Handle*>(e);
+  po::persistent_ptr<PersistentEntry> e = persistent_hashtable_->Lookup(key, hash);
+  TransientHandle* th = nullptr;
+  if (e != nullptr){
+    th = GetTransientHandle(e);
+    assert(e->InCache());
+    if (!e->HasRefs()){
+      LRU_Remove(e);
+    }
+    th->Ref();
+  }
+  return reinterpret_cast<Cache::Handle*>(th);
 }
 
 bool PMDKCacheShard::Ref(Cache::Handle* h) {
@@ -188,10 +199,7 @@ bool PMDKCacheShard::Ref(Cache::Handle* h) {
 }
 
 void PMDKCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
-  MutexLock l(&mutex_);
-  high_pri_pool_ratio_ = high_pri_pool_ratio;
-  high_pri_pool_capacity_ = capacity_ * high_pri_pool_ratio_;
-  MaintainPoolSize();
+  // TODO: call transient.
 }
 
 bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {

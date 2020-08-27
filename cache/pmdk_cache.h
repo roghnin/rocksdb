@@ -100,27 +100,18 @@ struct PersistentEntry{
   // persistent flags:
   po::p<bool> in_cache;
 
+  // TODO: set era to be current era.
   size_t era = 0;
   // transient fields, validated with era number:
   TransientHandle* trans_handle = nullptr;
 
-  TransientHandle* GetTransientHandle(){
-    TransientHandle* ret = trans_handle;
-    if (!ret){
-      // build a TransientHandle.
-      ret = reinterpret_cast<TransientHandle*>(
-        new char[sizeof(TransientHandle) - 1 + key_size]);
-
-      // TODO: use pack() to pack value.
-      // TODO: take care of deleter in transient handle, if we ever need one.
-      // ret->value = target->val.get();
-      trans_handle = ret;
-    }
-    return ret;
-  }
   void Free(){
     // TODO:
     // free key, val, trans_handle, the transient "coat" (Block or BlockContent) of val, and this.
+  }
+  void Ref(){
+    assert(trans_handle);
+    trans_handle->Ref();
   }
   bool InCache(){
     return in_cache;
@@ -253,9 +244,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   void LRU_Remove(po::persistent_ptr<PersistentEntry> e);
   void LRU_Insert(po::persistent_ptr<PersistentEntry> e);
 
-  // Overflow the last entry in high-pri pool to low-pri pool until size of
-  // high-pri pool is no larger than the size specify by high_pri_pool_pct.
-  void MaintainPoolSize();
+  TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e);
 
   // Free some space following strict LRU policy until enough space
   // to hold (usage_ + charge) is freed or the lru list is empty
