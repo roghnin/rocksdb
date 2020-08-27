@@ -132,19 +132,21 @@ void PMDKCacheShard::EvictFromLRU(size_t charge,
   }
 }
 
-TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<PersistentEntry> e){
+TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<PersistentEntry> e,
+                                            void* (*pack)(const Slice& slice)){
+  if (e == nullptr){
+    return nullptr;
+  }
   TransientHandle* ret = e->trans_handle;
-    if (!ret){
-      // build a TransientHandle.
-      ret = reinterpret_cast<TransientHandle*>(
-        new char[sizeof(TransientHandle) - 1 + e->key_size]);
-
-      // TODO: use pack() to pack value.
-      // TODO: take care of deleter in transient handle, if we ever need one.
-      // ret->value = target->val.get();
-      e->trans_handle = ret; // no need to be in transaction. It's transient.
-    }
-    return ret;
+  if (!ret){
+    // build a TransientHandle.
+    ret = new TransientHandle();
+    ret->key_data = e->key.get();
+    ret->key_length = e->key_size;
+    ret->value = pack(Slice(e->val.get(), e->val_size));
+    e->trans_handle = ret; // no need to be in transaction. It's transient.
+  }
+  return ret;
 }
 
 void PMDKCacheShard::SetCapacity(size_t capacity) {
@@ -179,7 +181,7 @@ Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
   po::persistent_ptr<PersistentEntry> e = persistent_hashtable_->Lookup(key, hash);
   TransientHandle* th = nullptr;
   if (e != nullptr){
-    th = GetTransientHandle(e);
+    th = GetTransientHandle(e, pack);
     assert(e->InCache());
     if (!e->HasRefs()){
       LRU_Remove(e);
@@ -235,7 +237,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                               // to cache line.
                               _SC_LEVEL2_CACHE_LINESIZE;
 
-  po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter] {
+  po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack] {
     bool fake_insertion = false;
     {
       MutexLock l(&mutex_);
@@ -280,7 +282,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           LRU_Insert(p_entry);
         } else {
           // TODO: don't do this when insertion into transient tier is successful.
-          TransientHandle* e = GetTransientHandle(p_entry);
+          TransientHandle* e = GetTransientHandle(p_entry, pack);
           e->Ref();
           *handle = reinterpret_cast<Cache::Handle*>(e);
         }
@@ -365,7 +367,9 @@ void* PMDKCache::Value(Handle* handle) {
 }
 
 size_t PMDKCache::GetCharge(Handle* handle) const {
-  return reinterpret_cast<const TransientHandle*>(handle)->charge;
+  // return reinterpret_cast<const TransientHandle*>(handle)->charge;
+  // TODO
+  return 0;
 }
 
 uint32_t PMDKCache::GetHash(Handle* handle) const {

@@ -34,19 +34,14 @@ namespace ROCKSDB_NAMESPACE {
 // or, maybe we don't even need a key field in the handle.
 struct TransientHandle {
   void* value;
-  void (*deleter)(const Slice&, void* value);
-  TransientHandle* next_hash;
-  TransientHandle* next;
-  TransientHandle* prev;
-  size_t charge;  // TODO(opt): Only allow uint32_t?
   size_t key_length;
   // The hash of key(). Used for fast sharding and comparisons.
   uint32_t hash;
   // The number of external refs to this entry. The cache itself is not counted.
   uint32_t refs;
 
-  // Beginning of the key (MUST BE THE LAST FIELD IN THIS STRUCT!)
-  char key_data[1];
+  // pointer to a key in persistent memory
+  char* key_data;
 
   Slice key() const { return Slice(key_data, key_length); }
 
@@ -62,29 +57,6 @@ struct TransientHandle {
 
   // Return true if there are external refs, false otherwise.
   bool HasRefs() const { return refs > 0; }
-
-  void Free() {
-    assert(refs == 0);
-    if (deleter) {
-      (*deleter)(key(), value);
-    }
-    delete[] reinterpret_cast<char*>(this);
-  }
-
-  // Caclculate the memory usage by metadata
-  inline size_t CalcTotalCharge(
-      CacheMetadataChargePolicy metadata_charge_policy) {
-    size_t meta_charge = 0;
-    if (metadata_charge_policy == kFullChargeCacheMetadata) {
-#ifdef ROCKSDB_MALLOC_USABLE_SIZE
-      meta_charge += malloc_usable_size(static_cast<void*>(this));
-#else
-      // This is the size that is used when a new handle is created
-      meta_charge += sizeof(TransientHandle) - 1 + key_length;
-#endif
-    }
-    return charge + meta_charge;
-  }
 };
 
 struct PersistentEntry{
@@ -244,7 +216,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   void LRU_Remove(po::persistent_ptr<PersistentEntry> e);
   void LRU_Insert(po::persistent_ptr<PersistentEntry> e);
 
-  TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e);
+  TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e, void* (*pack)(const Slice& slice));
 
   // Free some space following strict LRU policy until enough space
   // to hold (usage_ + charge) is freed or the lru list is empty
