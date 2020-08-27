@@ -109,10 +109,10 @@ struct PersistentEntry{
     // TODO:
     // free key, val, trans_handle, the transient "coat" (Block or BlockContent) of val, and this.
   }
-  void Ref(){
-    assert(trans_handle);
-    trans_handle->Ref();
-  }
+  // void Ref(){
+  //   assert(trans_handle);
+  //   trans_handle->Ref();
+  // }
   bool InCache(){
     return in_cache;
   }

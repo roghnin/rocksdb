@@ -116,21 +116,6 @@ void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
   lru_usage_ += e->persist_charge;
 }
 
-TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<PersistentEntry> e){
-  TransientHandle* ret = e->trans_handle;
-    if (!ret){
-      // build a TransientHandle.
-      ret = reinterpret_cast<TransientHandle*>(
-        new char[sizeof(TransientHandle) - 1 + e->key_size]);
-
-      // TODO: use pack() to pack value.
-      // TODO: take care of deleter in transient handle, if we ever need one.
-      // ret->value = target->val.get();
-      e->trans_handle = ret; // no need to be in transaction. It's transient.
-    }
-    return ret;
-}
-
 void PMDKCacheShard::EvictFromLRU(size_t charge,
                                  autovector<po::persistent_ptr<PersistentEntry>>* deleted) {
   while ((usage_ + charge) > persistent_capacity_ && lru_->next_lru != lru_) {
@@ -145,6 +130,21 @@ void PMDKCacheShard::EvictFromLRU(size_t charge,
     usage_ -= old_persist_charge;
     deleted->push_back(old);
   }
+}
+
+TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<PersistentEntry> e){
+  TransientHandle* ret = e->trans_handle;
+    if (!ret){
+      // build a TransientHandle.
+      ret = reinterpret_cast<TransientHandle*>(
+        new char[sizeof(TransientHandle) - 1 + e->key_size]);
+
+      // TODO: use pack() to pack value.
+      // TODO: take care of deleter in transient handle, if we ever need one.
+      // ret->value = target->val.get();
+      e->trans_handle = ret; // no need to be in transaction. It's transient.
+    }
+    return ret;
 }
 
 void PMDKCacheShard::SetCapacity(size_t capacity) {
@@ -275,6 +275,14 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
             usage_ -= old_persist_charge;
             last_reference_list.push_back(old);
           }
+        }
+        if (handle == nullptr){
+          LRU_Insert(p_entry);
+        } else {
+          // TODO: don't do this when insertion into transient tier is successful.
+          TransientHandle* e = GetTransientHandle(p_entry);
+          e->Ref();
+          *handle = reinterpret_cast<Cache::Handle*>(e);
         }
       }
     }
