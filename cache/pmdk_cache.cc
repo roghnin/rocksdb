@@ -197,7 +197,8 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              size_t charge,
                              void (*deleter)(const Slice& key, void* value),
                              Cache::Handle** handle, Cache::Priority priority,
-                             const Slice& (*unpack)(void* packed)) {
+                             const Slice& (*unpack)(void* packed),
+                             void* (*pack)(const Slice& value)) {
   
   Status s;
   
