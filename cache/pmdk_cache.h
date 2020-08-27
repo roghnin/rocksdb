@@ -45,19 +45,6 @@ struct TransientHandle {
   // The number of external refs to this entry. The cache itself is not counted.
   uint32_t refs;
 
-  enum Flags : uint8_t {
-    // Whether this entry is referenced by the hash table.
-    IN_CACHE = (1 << 0),
-    // Whether this entry is high priority entry.
-    IS_HIGH_PRI = (1 << 1),
-    // Whether this entry is in high-pri pool.
-    IN_HIGH_PRI_POOL = (1 << 2),
-    // Wwhether this entry has had any lookups (hits).
-    HAS_HIT = (1 << 3),
-  };
-
-  uint8_t flags;
-
   // Beginning of the key (MUST BE THE LAST FIELD IN THIS STRUCT!)
   char key_data[1];
 
@@ -75,37 +62,6 @@ struct TransientHandle {
 
   // Return true if there are external refs, false otherwise.
   bool HasRefs() const { return refs > 0; }
-
-  bool InCache() const { return flags & IN_CACHE; }
-  bool IsHighPri() const { return flags & IS_HIGH_PRI; }
-  bool InHighPriPool() const { return flags & IN_HIGH_PRI_POOL; }
-  bool HasHit() const { return flags & HAS_HIT; }
-
-  void SetInCache(bool in_cache) {
-    if (in_cache) {
-      flags |= IN_CACHE;
-    } else {
-      flags &= ~IN_CACHE;
-    }
-  }
-
-  void SetPriority(Cache::Priority priority) {
-    if (priority == Cache::Priority::HIGH) {
-      flags |= IS_HIGH_PRI;
-    } else {
-      flags &= ~IS_HIGH_PRI;
-    }
-  }
-
-  void SetInHighPriPool(bool in_high_pri_pool) {
-    if (in_high_pri_pool) {
-      flags |= IN_HIGH_PRI_POOL;
-    } else {
-      flags &= ~IN_HIGH_PRI_POOL;
-    }
-  }
-
-  void SetHit() { flags |= HAS_HIT; }
 
   void Free() {
     assert(refs == 0);
@@ -141,6 +97,8 @@ struct PersistentEntry{
   po::persistent_ptr<PersistentEntry> next_hash = nullptr;
   po::persistent_ptr<PersistentEntry> next_lru = nullptr;
   po::persistent_ptr<PersistentEntry> prev_lru = nullptr;
+  // persistent flags:
+  po::p<bool> in_cache;
 
   size_t era = 0;
   // transient fields, validated with era number:
@@ -165,15 +123,17 @@ struct PersistentEntry{
     // free key, val, trans_handle, the transient "coat" (Block or BlockContent) of val, and this.
   }
   bool InCache(){
-    // TODO
-    return true;
+    return in_cache;
   }
   bool HasRefs(){
-    // TODO: get data from trans_handle.
-    return true;
+    if (trans_handle == nullptr){
+      return false;
+    } else {
+      return trans_handle->HasRefs();
+    }
   }
   void SetInCache(bool x){
-    // TODO
+    in_cache = x;
   }
 };
 

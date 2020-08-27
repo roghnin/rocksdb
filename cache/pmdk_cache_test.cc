@@ -64,27 +64,12 @@ class PMDKCacheTest : public testing::Test {
     TransientHandle* lru_low_pri;
     cache_->TEST_GetLRUList(&lru, &lru_low_pri);
     TransientHandle* iter = lru;
-    bool in_high_pri_pool = false;
-    size_t high_pri_pool_keys = 0;
-    if (iter == lru_low_pri) {
-      in_high_pri_pool = true;
-    }
     for (const auto& key : keys) {
       iter = iter->next;
       ASSERT_NE(lru, iter);
       ASSERT_EQ(key, iter->key().ToString());
-      ASSERT_EQ(in_high_pri_pool, iter->InHighPriPool());
-      if (in_high_pri_pool) {
-        high_pri_pool_keys++;
-      }
-      if (iter == lru_low_pri) {
-        ASSERT_FALSE(in_high_pri_pool);
-        in_high_pri_pool = true;
-      }
     }
     ASSERT_EQ(lru, iter->next);
-    ASSERT_TRUE(in_high_pri_pool);
-    ASSERT_EQ(num_high_pri_pool_keys, high_pri_pool_keys);
   }
 
  private:
