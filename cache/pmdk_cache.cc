@@ -35,7 +35,9 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
       high_pri_pool_capacity_(0),
       usage_(0),
       lru_usage_(0),
-      mutex_(use_adaptive_mutex) {
+      mutex_(use_adaptive_mutex),
+      // TODO: set persistent_capacity dynamically.
+      persistent_capacity_(PMEMOBJ_POOL_SIZE) {
   set_metadata_charge_policy(metadata_charge_policy);
 
   // TODO: set up an LRUCacheShard as transient tier.
@@ -47,16 +49,17 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     pop_ = po::pool<PersistentRoot>::create(PHEAP_PATH, "pmdk_cache_pool", PMEMOBJ_POOL_SIZE, S_IRWXU);
     PersistentRoot* root = pop_.root().get();
     po::transaction::run(pop_, [&, root] {
-      root->persistent_hashtable = po::make_persistent<PersistTierHashTable>();
+      root->persistent_hashtable = po::make_persistent<PHashTableType>();
       root->persistent_lru_list = po::make_persistent<PersistentEntry>();
-      persistent_hashtable_ = root->persistent_hashtable.get();
-      lru_ = root->persistent_lru_list.get();
+      persistent_hashtable_ = new PersistTierHashTable(root->persistent_hashtable);
+      lru_ = root->persistent_lru_list;
     });
   } else {
     pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "pmdk_cache_pool");
-    persistent_hashtable_ = pop_.root()->persistent_hashtable.get();
-    lru_ = pop_.root()->persistent_lru_list.get();
+    persistent_hashtable_ = new PersistTierHashTable(pop_.root()->persistent_hashtable);
+    lru_ = pop_.root()->persistent_lru_list;
   }
+
 }
 
 void PMDKCacheShard::EraseUnRefEntries() {
@@ -87,22 +90,22 @@ double PMDKCacheShard::GetHighPriPoolRatio() {
   return high_pri_pool_ratio_;
 }
 
-void PMDKCacheShard::LRU_Remove(PersistentEntry* e) {
-  assert(e->next_lru.get() != nullptr);
-  assert(e->prev_lru.get() != nullptr);
+void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
+  assert(e->next_lru != nullptr);
+  assert(e->prev_lru != nullptr);
   po::transaction::run(pop_, [&, e] {
     e->next_lru->prev_lru = e->prev_lru;
     e->prev_lru->next_lru = e->next_lru;
     e->prev_lru = e->next_lru = nullptr;
   });
-  size_t total_charge = e->persist_charge;
-  assert(lru_usage_ >= total_charge);
-  lru_usage_ -= total_charge;
+  size_t persist_charge = e->persist_charge;
+  assert(lru_usage_ >= persist_charge);
+  lru_usage_ -= persist_charge;
 }
 
-void PMDKCacheShard::LRU_Insert(PersistentEntry* e) {
-  assert(e->next_lru.get() == nullptr);
-  assert(e->prev_lru.get() == nullptr);
+void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
+  assert(e->next_lru == nullptr);
+  assert(e->prev_lru == nullptr);
   po::transaction::run(pop_, [&, e] {
     // Inset "e" to head of LRU list.
     e->next_lru = lru_;
@@ -128,26 +131,30 @@ void PMDKCacheShard::MaintainPoolSize() {
 }
 
 void PMDKCacheShard::EvictFromLRU(size_t charge,
-                                 autovector<PersistentEntry*>* deleted) {
-  while ((usage_ + charge) > capacity_ && lru_->next_lru.get() != lru_) {
-    PersistentEntry* old = lru_->next_lru.get();
+                                 autovector<po::persistent_ptr<PersistentEntry>>* deleted) {
+  while ((usage_ + charge) > persistent_capacity_ && lru_->next_lru != lru_) {
+    po::persistent_ptr<PersistentEntry> old = lru_->next_lru;
     // LRU list contains only elements which can be evicted
     assert(old->InCache() && !old->HasRefs());
     LRU_Remove(old);
     persistent_hashtable_->Remove(old);
     old->SetInCache(false);
-    size_t old_total_charge = old->persist_charge;
-    assert(usage_ >= old_total_charge);
-    usage_ -= old_total_charge;
+    size_t old_persist_charge = old->persist_charge;
+    assert(usage_ >= old_persist_charge);
+    usage_ -= old_persist_charge;
     deleted->push_back(old);
   }
 }
 
 void PMDKCacheShard::SetCapacity(size_t capacity) {
-  autovector<PersistentEntry*> last_reference_list;
+  // TODO: call transient SetCapacity.
+}
+
+void PMDKCacheShard::SetPersistentCapacity(size_t capacity) {
+  autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
   {
     MutexLock l(&mutex_);
-    capacity_ = capacity;
+    persistent_capacity_ = capacity;
     EvictFromLRU(0, &last_reference_list);
   }
 
@@ -157,9 +164,8 @@ void PMDKCacheShard::SetCapacity(size_t capacity) {
   }
 }
 
-void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit) {
-  MutexLock l(&mutex_);
-  strict_capacity_limit_ = strict_capacity_limit;
+void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit){
+  // TODO: call transient SetStrictCapacityLimit().
 }
 
 Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
@@ -167,7 +173,7 @@ Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
   // TODO: lookup transient hash table
 
   // lookup persistent table:
-  TransientHandle* e = persistent_hashtable_->Lookup(key, hash);
+  TransientHandle* e = persistent_hashtable_->Lookup(key, hash)->GetTransientHandle();
   // TODO: LRU operations.
   return reinterpret_cast<Cache::Handle*>(e);
 }
@@ -201,12 +207,15 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              void* (*pack)(const Slice& value)) {
   
   Status s;
-  
-  // TODO: insertion into transient tier
+  Status* s_p = &s;
 
-  autovector<PersistentEntry*> last_reference_list;
+  // TODO: insertion into transient tier
+  // note that the transient charge may be underestimated since the
+  // space overhead of (*pack) is not counted. We may argue that it shouldn't be counted...
+
+  autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
   // insertion into persistent tier
-  const Slice unpacked_val = unpack(value);
+  const Slice& unpacked_val = unpack(value);
   // TODO: better estimation of persistent total charge:
 
   size_t persistent_charge = sizeof(PersistentEntry) + 
@@ -217,26 +226,58 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                               // to cache line.
                               _SC_LEVEL2_CACHE_LINESIZE;
 
-  {
-    MutexLock l(&mutex_);
-    EvictFromLRU(persistent_charge, &last_reference_list);
-    // TODO: calculate charge and refuse insert if cache is full
-    po::transaction::run(pop_, [&, unpacked_val, persistent_charge] {
-      auto p_entry = po::make_persistent<PersistentEntry>();
-      p_entry->persist_charge = persistent_charge;
-      p_entry->key_size = key.size();
-      p_entry->key = po::make_persistent<char[]>(key.size());
-      p_entry->val_size = unpacked_val.size();
-      p_entry->val = po::make_persistent<char[]>(unpacked_val.size());
-      pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
-      pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
-      persistent_hashtable_->Insert(hash, key, p_entry);
-    });
-  }
-  // Free the entries here outside of mutex for performance reasons
-  for (auto entry : last_reference_list) {
-    entry->Free();
-  }
+  po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter] {
+    bool fake_insertion = false;
+    {
+      MutexLock l(&mutex_);
+      EvictFromLRU(persistent_charge, &last_reference_list);
+      // TODO: calculate charge and refuse insert if cache is full
+      if ((usage_ + persistent_charge) > persistent_capacity_ && handle == nullptr){
+        if (handle == nullptr){
+          // Don't insert the entry but still return ok, as if the entry inserted
+          // into cache and get evicted immediately.
+          fake_insertion = true;
+        } else {
+          *handle == nullptr;
+          *s_p = Status::Incomplete("Insert failed due to LRU cache being full.");
+        }
+      } else {
+        // create new persistent entry
+        auto p_entry = po::make_persistent<PersistentEntry>();
+        p_entry->persist_charge = persistent_charge;
+        p_entry->key_size = key.size();
+        p_entry->key = po::make_persistent<char[]>(key.size());
+        p_entry->val_size = unpacked_val.size();
+        p_entry->val = po::make_persistent<char[]>(unpacked_val.size());
+        // memcpy from transient to persistent tier
+        pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
+        pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
+        // insert persistent entry into hash table.
+        po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(hash, key, p_entry);
+        usage_ += persistent_charge;
+        if (old != nullptr){
+          *s_p = Status::OkOverwritten();
+          assert(old->InCache());
+          old->SetInCache(false);
+          if (!old->HasRefs()){
+            LRU_Remove(old);
+            size_t old_persist_charge = old->persist_charge;
+            assert(usage_ >= old_persist_charge);
+            usage_ -= old_persist_charge;
+            last_reference_list.push_back(old);
+          }
+        }
+      }
+    }
+    if (fake_insertion){
+      (*deleter)(key, value);
+    }
+    // Free the entries here outside of mutex for performance reasons
+    for (auto entry : last_reference_list) {
+      entry->Free();
+    }
+  });
+
   return s;
 }
 
