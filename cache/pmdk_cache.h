@@ -166,48 +166,48 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                 double high_pri_pool_ratio, bool use_adaptive_mutex,
                 CacheMetadataChargePolicy metadata_charge_policy);
-  virtual ~PMDKCacheShard() override = default;
+  ~PMDKCacheShard() override = default;
 
   // Separate from constructor so caller can easily make an array of PMDKCache
   // if current usage is more than new capacity, the function will attempt to
   // free the needed space
-  virtual void SetCapacity(size_t capacity) override;
+  void SetCapacity(size_t capacity) override;
   void SetPersistentCapacity(size_t capacity);
 
   // Set the flag to reject insertion if cache if full.
-  virtual void SetStrictCapacityLimit(bool strict_capacity_limit) override;
+  void SetStrictCapacityLimit(bool strict_capacity_limit) override;
 
   // Set percentage of capacity reserved for high-pri cache entries.
   void SetHighPriorityPoolRatio(double high_pri_pool_ratio);
 
   // Like Cache methods, but with an extra "hash" parameter.
-  virtual Status Insert(const Slice& key, uint32_t hash, void* value,
+  Status Insert(const Slice& key, uint32_t hash, void* value,
                         size_t charge,
                         void (*deleter)(const Slice& key, void* value),
                         Cache::Handle** handle,
                         Cache::Priority priority,
                         const Slice& (*unpack)(void* value) = nullptr,
                         void* (*pack)(const Slice& value) = nullptr) override;
-  virtual Cache::Handle* Lookup(const Slice& key, uint32_t hash,
+  Cache::Handle* Lookup(const Slice& key, uint32_t hash,
                                  void* (*pack)(const Slice& value) = nullptr) override;
-  virtual bool Ref(Cache::Handle* handle) override;
-  virtual bool Release(Cache::Handle* handle,
+  bool Ref(Cache::Handle* handle) override;
+  bool Release(Cache::Handle* handle,
                        bool force_erase = false) override;
-  virtual void Erase(const Slice& key, uint32_t hash) override;
+  void Erase(const Slice& key, uint32_t hash) override;
 
   // Although in some platforms the update of size_t is atomic, to make sure
   // GetUsage() and GetPinnedUsage() work correctly under any platform, we'll
   // protect them with mutex_.
 
-  virtual size_t GetUsage() const override;
-  virtual size_t GetPinnedUsage() const override;
+  size_t GetUsage() const override;
+  size_t GetPinnedUsage() const override;
 
-  virtual void ApplyToAllCacheEntries(void (*callback)(void*, size_t),
+  void ApplyToAllCacheEntries(void (*callback)(void*, size_t),
                                       bool thread_safe) override;
 
-  virtual void EraseUnRefEntries() override;
+  void EraseUnRefEntries() override;
 
-  virtual std::string GetPrintableOptions() const override;
+  std::string GetPrintableOptions() const override;
 
   void TEST_GetLRUList(TransientHandle** lru, TransientHandle** lru_low_pri);
 
@@ -304,13 +304,13 @@ class PMDKCache
            CacheMetadataChargePolicy metadata_charge_policy =
                kDontChargeCacheMetadata);
   virtual ~PMDKCache();
-  virtual const char* Name() const override { return "PMDKCache"; }
-  virtual CacheShard* GetShard(int shard) override;
-  virtual const CacheShard* GetShard(int shard) const override;
-  virtual void* Value(Handle* handle) override;
-  virtual size_t GetCharge(Handle* handle) const override;
-  virtual uint32_t GetHash(Handle* handle) const override;
-  virtual void DisownData() override;
+  const char* Name() const override { return "PMDKCache"; }
+  CacheShard* GetShard(int shard) override;
+  const CacheShard* GetShard(int shard) const override;
+  void* Value(Handle* handle) override;
+  size_t GetCharge(Handle* handle) const override;
+  uint32_t GetHash(Handle* handle) const override;
+  void DisownData() override;
 
   //  Retrieves number of elements in LRU, for unit test purpose only
   size_t TEST_GetLRUSize();
