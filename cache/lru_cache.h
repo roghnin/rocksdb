@@ -213,7 +213,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard final : public CacheShard {
                         void (*deleter)(const Slice& key, void* value),
                         Cache::Handle** handle,
                         Cache::Priority priority,
-                        const Slice& /*(*unpack)*/ (void* value),
+                        const Slice /*(*unpack)*/ (void* value),
                         void* /*(*pack)*/ (const Slice& value)) override;
   virtual Cache::Handle* Lookup(const Slice& key, uint32_t hash,
                           void* /*(*pack)*/ (const Slice& value)) override;

@@ -341,7 +341,7 @@ Status LRUCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              size_t charge,
                              void (*deleter)(const Slice& key, void* value),
                              Cache::Handle** handle, Cache::Priority priority,
-                             const Slice& /*(*unpack)*/ (void* value),
+                             const Slice /*(*unpack)*/ (void* value),
                              void* /*(*pack)*/ (const Slice& value)) {
   // Allocate the memory here outside of the mutex
   // If the cache is full, we'll have to release it

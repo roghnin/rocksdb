@@ -271,7 +271,7 @@ class ClockCacheShard final : public CacheShard {
   Status Insert(const Slice& key, uint32_t hash, void* value, size_t charge,
                 void (*deleter)(const Slice& key, void* value),
                 Cache::Handle** handle, Cache::Priority priority,
-                const Slice& /*(*unpack)*/ (void* value),
+                const Slice /*(*unpack)*/ (void* value),
                 void* /*(*pack)*/ (const Slice& value)) override;
   Cache::Handle* Lookup(const Slice& key, uint32_t hash,
                         void* /*(*pack)*/ (const Slice& value)) override;
@@ -620,7 +620,7 @@ Status ClockCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                                void (*deleter)(const Slice& key, void* value),
                                Cache::Handle** out_handle,
                                Cache::Priority /*priority*/,
-                               const Slice& /*(*unpack)*/ (void* value),
+                               const Slice /*(*unpack)*/ (void* value),
                                void* /*(*pack)*/ (const Slice& value)) {
   CleanupContext context;
   HashTable::accessor accessor;

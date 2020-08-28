@@ -198,7 +198,7 @@ class Cache {
                         void (*deleter)(const Slice& key, void* value),
                         Handle** handle = nullptr,
                         Priority priority = Priority::LOW,
-                        const Slice& (*unpack)(void* value) = nullptr,
+                        const Slice (*unpack)(void* value) = nullptr,
                         void* (*pack)(const Slice& value) = nullptr) = 0;
 
   // If the cache has no mapping for "key", returns nullptr.

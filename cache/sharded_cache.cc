@@ -46,7 +46,7 @@ void ShardedCache::SetStrictCapacityLimit(bool strict_capacity_limit) {
 Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
                             void (*deleter)(const Slice& key, void* value),
                             Handle** handle, Priority priority,
-                            const Slice& (*unpack)(void* value),
+                            const Slice (*unpack)(void* value),
                             void* (*pack)(const Slice& value)) {
   uint32_t hash = HashSlice(key);
   return GetShard(Shard(hash))
