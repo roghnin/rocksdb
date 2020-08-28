@@ -29,9 +29,15 @@ namespace po = pmem::obj;
 
 namespace ROCKSDB_NAMESPACE {
 
+struct HandleClassifier{
+  void* foo;
+  void* type;
+};
+
 // This will be the transient handle of the cache.
 struct TransientHandle {
   void* value;
+  void* type = reinterpret_cast<void*>(0x1);
   size_t key_length;
   // The hash of key(). Used for fast sharding and comparisons.
   uint32_t hash;
@@ -223,6 +229,11 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   void LRU_Insert(po::persistent_ptr<PersistentEntry> e);
 
   TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e, void* (*pack)(const Slice& slice));
+
+  // Tell apart LRUHandle and TransientHandle by looking at the second word.
+  // The second word of LRUHandle is function pointer, either null or an address
+  // The second word of TransientHandle will always be 0x1.
+  bool IsLRUHandle(Cache::Handle* e);
 
   // Free some space following strict LRU policy until enough space
   // to hold (usage_ + charge) is freed or the lru list is empty

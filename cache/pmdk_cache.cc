@@ -160,6 +160,15 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
   return ret;
 }
 
+bool PMDKCacheShard::IsLRUHandle(Cache::Handle* e){
+  HandleClassifier* hc = reinterpret_cast<HandleClassifier*>(e);
+  if (hc->type == reinterpret_cast<void*>(0x1)){
+    return false;
+  } else {
+    return true;
+  }
+}
+
 void PMDKCacheShard::SetCapacity(size_t capacity) {
   // TODO: call transient SetCapacity.
 }
@@ -216,8 +225,20 @@ void PMDKCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
 }
 
 bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
-  // TODO
-  return true;
+  if (handle == nullptr){
+    return false;
+  }
+  if (IsLRUHandle(handle)){
+    // TODO: release from transient tier
+
+    if (force_erase){
+      // TODO: erase in persistent tier
+    }
+  } else {
+    // TODO: release and/or erase in persistent tier
+  }
+  
+
 }
 
 Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
