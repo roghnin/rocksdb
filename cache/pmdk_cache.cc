@@ -52,12 +52,14 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
       root->persistent_hashtable = po::make_persistent<PHashTableType>();
       root->persistent_lru_list = po::make_persistent<PersistentEntry>();
       root->era = 0;
+      // TDOO: make this a move construction.
       persistent_hashtable_ = new PersistTierHashTable(root->persistent_hashtable);
       lru_ = root->persistent_lru_list;
     });
     era_ = 0;
   } else {
     pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "pmdk_cache_pool");
+    // TDOO: make this a move construction.
     persistent_hashtable_ = new PersistTierHashTable(pop_.root()->persistent_hashtable);
     lru_ = pop_.root()->persistent_lru_list;
     era_ = ++pop_.root()->era;
@@ -155,6 +157,7 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
     ret->key_data = e->key.get();
     ret->key_length = e->key_size;
     ret->value = pack(Slice(e->val.get(), e->val_size));
+    ret->p_entry = e;
     e->trans_handle = ret; // no need to be in transaction. It's transient.
   }
   return ret;
@@ -228,17 +231,52 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
   if (handle == nullptr){
     return false;
   }
+  bool last_reference = false;
   if (IsLRUHandle(handle)){
     // TODO: release from transient tier
 
     if (force_erase){
       // TODO: erase in persistent tier
+      // grab the key in LRUHandle, find the persistent entry, and remove it.
     }
+    // return false in this case, since
+    // there must be an entry in persistent tier.
+    last_reference = false;
   } else {
-    // TODO: release and/or erase in persistent tier
+    bool* last_reference_p = &last_reference;
+    po::transaction::run(pop_, [&, handle, force_erase, last_reference_p] {
+      TransientHandle* e = reinterpret_cast<TransientHandle*>(handle);
+      {
+        MutexLock l(&mutex_);
+        *last_reference_p = e->Unref();
+        if (*last_reference_p && e->p_entry->InCache()) {
+          // The item is still in cache, and nobody else holds a reference to it
+          if (usage_ > persistent_capacity_ || force_erase){
+            // The LRU list must be empty since the cache is full
+            assert(lru_->next_lru == lru_ || force_erase);
+            // Take this opportunity and remove the item
+            persistent_hashtable_->Remove(e->p_entry);
+            e->p_entry->SetInCache(false);
+          } else {
+            // Put the item back on the LRU list, and don't free it
+            LRU_Insert(e->p_entry);
+            *last_reference_p = false;
+          }
+        }
+        if (*last_reference_p){
+          size_t total_charge = e->p_entry->persist_charge;
+          assert(usage_ >= total_charge);
+          usage_ -= total_charge;
+        }
+      }
+      if (*last_reference_p){
+        // TODO: double-check if this is able to free
+        // both persistent and transient metadata.
+        e->p_entry->Free();
+      }
+    });
   }
-  
-
+  return last_reference;
 }
 
 Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
@@ -260,7 +298,6 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   // insertion into persistent tier
   const Slice& unpacked_val = unpack(value);
   // TODO: better estimation of persistent total charge:
-
   size_t persistent_charge = sizeof(PersistentEntry) + 
                               key.size() + 
                               unpacked_val.size() + 
@@ -311,7 +348,8 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
         if (handle == nullptr){
           LRU_Insert(p_entry);
         } else {
-          // TODO: don't do this when insertion into transient tier is successful.
+          // TODO: don't do this when insertion into transient tier
+          // is successful. Always insert into LRU instead.
           TransientHandle* e = GetTransientHandle(p_entry, pack);
           e->Ref();
           *handle = reinterpret_cast<Cache::Handle*>(e);
@@ -330,7 +368,32 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
 }
 
 void PMDKCacheShard::Erase(const Slice& key, uint32_t hash) {
-  // TODO
+  // TODO: erase from transient tier
+
+  // erase from persistent tier
+  po::transaction::run(pop_, [&, key, hash] {
+    bool last_reference;
+    po::persistent_ptr<PersistentEntry> e;
+    {
+      MutexLock l(&mutex_);
+      e = persistent_hashtable_->Remove(key, hash);
+      if (e != nullptr) {
+        assert(e->InCache());
+        e->SetInCache(false);
+        if (!e->HasRefs()){
+          // The entry is in LRU since it's in hash and has no external references
+          LRU_Remove(e);
+          size_t total_charge = e->persist_charge;
+          assert(usage_ >= total_charge);
+          usage_ -= total_charge;
+          last_reference = true;
+        }
+      }
+    }
+    if (last_reference) {
+      e->Free();
+    }
+  });
 }
 
 size_t PMDKCacheShard::GetUsage() const {

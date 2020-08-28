@@ -34,16 +34,20 @@ struct HandleClassifier{
   void* type;
 };
 
+struct PersistentEntry;
+
 // This will be the transient handle of the cache.
 struct TransientHandle {
   void* value;
+  // a fixed number to tell TransientHandle and LRUHandle apart.
   void* type = reinterpret_cast<void*>(0x1);
   size_t key_length;
   // The hash of key(). Used for fast sharding and comparisons.
   uint32_t hash;
   // The number of external refs to this entry. The cache itself is not counted.
   uint32_t refs;
-
+  // a pointer to persistent entry
+  po::persistent_ptr<PersistentEntry> p_entry;
   // pointer to a key in persistent memory
   char* key_data;
 
@@ -267,6 +271,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   TransientHandle* lru_low_pri_;
 
   // This is a concurrent persistent container provided by PMDK.
+  // TODO: make this an instance rather than a pointer.
   PersistTierHashTable* persistent_hashtable_;
 
   // Current era number. Advanced every crash.
