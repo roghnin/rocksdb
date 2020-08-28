@@ -51,13 +51,16 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     po::transaction::run(pop_, [&, root] {
       root->persistent_hashtable = po::make_persistent<PHashTableType>();
       root->persistent_lru_list = po::make_persistent<PersistentEntry>();
+      root->era = 0;
       persistent_hashtable_ = new PersistTierHashTable(root->persistent_hashtable);
       lru_ = root->persistent_lru_list;
     });
+    era_ = 0;
   } else {
     pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "pmdk_cache_pool");
     persistent_hashtable_ = new PersistTierHashTable(pop_.root()->persistent_hashtable);
     lru_ = pop_.root()->persistent_lru_list;
+    era_ = ++pop_.root()->era;
   }
 
 }
@@ -137,6 +140,14 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
   if (e == nullptr){
     return nullptr;
   }
+  // TODO: this transaction might not be necessary if the underlying NVM has word-level
+  // store atomicity.
+  po::transaction::run(pop_, [&, e] {
+    if (e->era < era_){
+      e->era = era_;
+      e->trans_handle = nullptr;
+    }
+  });
   TransientHandle* ret = e->trans_handle;
   if (!ret){
     // build a TransientHandle.

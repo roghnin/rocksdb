@@ -30,8 +30,6 @@ namespace po = pmem::obj;
 namespace ROCKSDB_NAMESPACE {
 
 // This will be the transient handle of the cache.
-// TODO: maybe we can have fixed-size keys, as they're always built from persistent entry?
-// or, maybe we don't even need a key field in the handle.
 struct TransientHandle {
   void* value;
   size_t key_length;
@@ -159,6 +157,7 @@ public:
 struct PersistentRoot{
   po::persistent_ptr<PHashTableType> persistent_hashtable;
   po::persistent_ptr<PersistentEntry> persistent_lru_list;
+  po::p<size_t> era;
 };
 
 // A single shard of sharded cache.
@@ -256,7 +255,11 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   // Pointer to head of low-pri pool in LRU list.
   TransientHandle* lru_low_pri_;
 
-  po::pool<PersistentRoot> pop_;
+  // This is a concurrent persistent container provided by PMDK.
+  PersistTierHashTable* persistent_hashtable_;
+
+  // Current era number. Advanced every crash.
+  size_t era_;
 
   // ------------^^^^^^^^^^^^^-----------
   // Not frequently modified data members
@@ -271,8 +274,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   // ------------vvvvvvvvvvvvv-----------
   // TransientHandleTable table_;
 
-  // This is a concurrent persistent container provided by PMDK.
-  PersistTierHashTable* persistent_hashtable_;
+  // PMDK's persistent memory pool;
+  po::pool<PersistentRoot> pop_;
 
   // TODO: recover memory usage and lru usage data after crash, or consider persisting them.
 
