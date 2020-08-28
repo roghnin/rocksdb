@@ -86,10 +86,6 @@ struct PersistentEntry{
   // transient fields, validated with era number:
   TransientHandle* trans_handle = nullptr;
 
-  void Free(){
-    // TODO:
-    // free key, val, trans_handle, the transient "coat" (Block or BlockContent) of val, and this.
-  }
   // void Ref(){
   //   assert(trans_handle);
   //   trans_handle->Ref();
@@ -233,6 +229,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   void LRU_Insert(po::persistent_ptr<PersistentEntry> e);
 
   TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e, void* (*pack)(const Slice& slice));
+
+  void FreePEntry(po::persistent_ptr<PersistentEntry> e);
 
   // Tell apart LRUHandle and TransientHandle by looking at the second word.
   // The second word of LRUHandle is function pointer, either null or an address

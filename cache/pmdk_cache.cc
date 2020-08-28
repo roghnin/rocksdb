@@ -163,6 +163,21 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
   return ret;
 }
 
+void PMDKCacheShard::FreePEntry(po::persistnent_ptr<PersistentEntry> e){
+  // This must be called within a transaction, so no transaction needed here.
+  // free key, val, trans_handle, the transient "coat" (Block or BlockContent) of val,
+  // and persistent entry.
+
+  // free transient handle first, since the deleter may use e->key and/or e->value.
+  if (e->era == era_ && e->trans_handle != nullptr){
+    // TODO: get deleter in TransientEntry and delete value here.
+    delete e->trans_handle;
+  }
+  po::delete_persistent(e->key);
+  po::delete_persistnet(e->val);
+  po::delete_persistent(e);
+}
+
 bool PMDKCacheShard::IsLRUHandle(Cache::Handle* e){
   HandleClassifier* hc = reinterpret_cast<HandleClassifier*>(e);
   if (hc->type == reinterpret_cast<void*>(0x1)){
@@ -177,17 +192,19 @@ void PMDKCacheShard::SetCapacity(size_t capacity) {
 }
 
 void PMDKCacheShard::SetPersistentCapacity(size_t capacity) {
-  autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
-  {
-    MutexLock l(&mutex_);
-    persistent_capacity_ = capacity;
-    EvictFromLRU(0, &last_reference_list);
-  }
+  po::transaction::run(pop_, [&, capacity] {
+    autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
+    {
+      MutexLock l(&mutex_);
+      persistent_capacity_ = capacity;
+      EvictFromLRU(0, &last_reference_list);
+    }
 
-  // Free the entries outside of mutex for performance reasons
-  for (auto entry : last_reference_list) {
-    entry->Free();
-  }
+    // Free the entries outside of mutex for performance reasons
+    for (auto entry : last_reference_list) {
+      FreePEntry(entry);
+    }
+  });
 }
 
 void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit){
@@ -272,7 +289,7 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
       if (*last_reference_p){
         // TODO: double-check if this is able to free
         // both persistent and transient metadata.
-        e->p_entry->Free();
+        FreePEntry(e->p_entry);
       }
     });
   }
@@ -358,7 +375,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
     }
     // Free the entries here outside of mutex for performance reasons
     for (auto entry : last_reference_list) {
-      entry->Free();
+      FreePEntry(entry);
     }
   });
 
@@ -391,7 +408,7 @@ void PMDKCacheShard::Erase(const Slice& key, uint32_t hash) {
       }
     }
     if (last_reference) {
-      e->Free();
+      FreePEntry(e);
     }
   });
 }
