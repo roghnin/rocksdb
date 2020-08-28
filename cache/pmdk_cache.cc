@@ -238,20 +238,17 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                               _SC_LEVEL2_CACHE_LINESIZE;
 
   po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack] {
-    bool fake_insertion = false;
     {
       MutexLock l(&mutex_);
       EvictFromLRU(persistent_charge, &last_reference_list);
       // TODO: calculate charge and refuse insert if cache is full
-      if ((usage_ + persistent_charge) > persistent_capacity_ && handle == nullptr){
-        if (handle == nullptr){
-          // Don't insert the entry but still return ok, as if the entry inserted
-          // into cache and get evicted immediately.
-          fake_insertion = true;
-        } else {
-          *handle == nullptr;
+      if ((usage_ + persistent_charge) > persistent_capacity_){
+        if (handle != nullptr) {
+          *handle = nullptr;
           *s_p = Status::Incomplete("Insert failed due to LRU cache being full.");
         }
+        // else, do nothing here and pretend the insertion succeeded but entry got
+        // kicked out immediately.
       } else {
         // create new persistent entry
         auto p_entry = po::make_persistent<PersistentEntry>();
@@ -289,14 +286,13 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
         }
       }
     }
-    if (fake_insertion){
-      (*deleter)(key, value);
-    }
     // Free the entries here outside of mutex for performance reasons
     for (auto entry : last_reference_list) {
       entry->Free();
     }
   });
+
+  // TODO: if transient tier intended to call deleter, call it here.
 
   return s;
 }
