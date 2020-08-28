@@ -66,6 +66,7 @@ struct PersistentEntry{
   po::p<size_t> persist_charge;
   po::persistent_ptr<char[]> key;
   po::persistent_ptr<char[]> val;
+  po::p<uint32_t> hash;
   po::persistent_ptr<PersistentEntry> next_hash = nullptr;
   po::persistent_ptr<PersistentEntry> next_lru = nullptr;
   po::persistent_ptr<PersistentEntry> prev_lru = nullptr;
@@ -139,13 +140,19 @@ public:
     return (*FindPointer(key, hash));
   }
   
+  // this may only be used by Erase().
   po::persistent_ptr<PersistentEntry> Remove(const Slice& key, uint32_t hash){
-    // TODO
-    // this may only be used by Erase().
+    po::persistent_ptr<PersistentEntry>* ptr = FindPointer(key, hash);
+    po::persistent_ptr<PersistentEntry> result = *ptr;
+    if (result != nullptr){
+      *ptr = result->next_hash;
+    }
+    return result;
   }
+
+  // this is used by EvictFromLRU().
   po::persistent_ptr<PersistentEntry> Remove(po::persistent_ptr<PersistentEntry> e){
-    // TODO
-    // this is used by EvictFromLRU(). consider having hash persisted in PersistentEntry.
+    return Remove(Slice(e->key.get(), e->key_size), e->hash);
   }
 };
 

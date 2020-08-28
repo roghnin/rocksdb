@@ -260,6 +260,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
         p_entry->key = po::make_persistent<char[]>(key.size());
         p_entry->val_size = unpacked_val.size();
         p_entry->val = po::make_persistent<char[]>(unpacked_val.size());
+        p_entry->hash = hash;
         // memcpy from transient to persistent tier
         pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
         pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
