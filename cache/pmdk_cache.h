@@ -41,6 +41,9 @@ struct TransientHandle {
   void* value;
   // a fixed number to tell TransientHandle and LRUHandle apart.
   void* type = reinterpret_cast<void*>(0x1);
+  // deleter of *value
+  void (*deleter)(const Slice& key, void* value);
+  // length of key on persistent memory.
   size_t key_length;
   // The hash of key(). Used for fast sharding and comparisons.
   uint32_t hash;
@@ -229,7 +232,9 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   void LRU_Remove(po::persistent_ptr<PersistentEntry> e);
   void LRU_Insert(po::persistent_ptr<PersistentEntry> e);
 
-  TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e, void* (*pack)(const Slice& slice));
+  TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e,
+                                      void* (*pack)(const Slice& slice),
+                                      void (*deleter)(const Slice& key, void* value));
 
   void FreePEntry(po::persistent_ptr<PersistentEntry> e);
 

@@ -138,7 +138,8 @@ void PMDKCacheShard::EvictFromLRU(size_t charge,
 }
 
 TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<PersistentEntry> e,
-                                            void* (*pack)(const Slice& slice)){
+                                            void* (*pack)(const Slice& slice),
+                                            void (*deleter)(const Slice& key, void* value)){
   if (e == nullptr){
     return nullptr;
   }
@@ -158,6 +159,7 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
     ret->key_length = e->key_size;
     ret->value = pack(Slice(e->val.get(), e->val_size));
     ret->p_entry = e;
+    ret->deleter = deleter;
     e->trans_handle = ret; // no need to be in transaction. It's transient.
   }
   return ret;
@@ -170,7 +172,7 @@ void PMDKCacheShard::FreePEntry(po::persistent_ptr<PersistentEntry> e){
 
   // free transient handle first, since the deleter may use e->key and/or e->value.
   if (e->era == era_ && e->trans_handle != nullptr){
-    // TODO: get deleter in TransientEntry and delete value here.
+    e->trans_handle->deleter(Slice(e->val.get(), e->val_size), e->trans_handle->value);
     delete e->trans_handle;
   }
   po::delete_persistent<char[]>(e->key, (int)e->key_size);
@@ -222,7 +224,7 @@ Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
   po::persistent_ptr<PersistentEntry> e = persistent_hashtable_->Lookup(key, hash);
   TransientHandle* th = nullptr;
   if (e != nullptr){
-    th = GetTransientHandle(e, pack);
+    th = GetTransientHandle(e, pack, deleter);
     assert(e->InCache());
     if (!e->HasRefs()){
       LRU_Remove(e);
@@ -369,7 +371,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
         } else {
           // TODO: don't do this when insertion into transient tier
           // is successful. Always insert into LRU instead.
-          TransientHandle* e = GetTransientHandle(p_entry, pack);
+          TransientHandle* e = GetTransientHandle(p_entry, pack, deleter);
           e->Ref();
           *handle = reinterpret_cast<Cache::Handle*>(e);
         }
