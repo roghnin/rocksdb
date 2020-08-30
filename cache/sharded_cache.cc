@@ -54,7 +54,8 @@ Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
 }
 
 Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/,
-                                    void* (*pack)(const Slice& value)) {
+                                    void* (*pack)(const Slice& value),
+                                    void (*deleter)(const Slice&, void* value)) {
   uint32_t hash = HashSlice(key);
   return GetShard(Shard(hash))->Lookup(key, hash, pack);
 }

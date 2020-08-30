@@ -269,7 +269,8 @@ void LRUCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit) {
 }
 
 Cache::Handle* LRUCacheShard::Lookup(const Slice& key, uint32_t hash,
-                                    void* /*(*pack)*/ (const Slice& value)) {
+                                    void* /*(*pack)*/ (const Slice& value),
+                                    void /*(*deleter)*/ (const Slice&, void* value)) {
   MutexLock l(&mutex_);
   LRUHandle* e = table_.Lookup(key, hash);
   if (e != nullptr) {

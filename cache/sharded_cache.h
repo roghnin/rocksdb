@@ -31,7 +31,8 @@ class CacheShard {
                         const Slice (*unpack)(void* value) = nullptr,
                         void* (*pack)(const Slice& value) = nullptr) = 0;
   virtual Cache::Handle* Lookup(const Slice& key, uint32_t hash,
-                                void* (*pack)(const Slice& value) = nullptr) = 0;
+                                void* (*pack)(const Slice& value) = nullptr,
+                                void (*deleter)(const Slice&, void* value) = nullptr) = 0;
   virtual bool Ref(Cache::Handle* handle) = 0;
   virtual bool Release(Cache::Handle* handle, bool force_erase = false) = 0;
   virtual void Erase(const Slice& key, uint32_t hash) = 0;
@@ -78,7 +79,8 @@ class ShardedCache : public Cache {
                         const Slice (*unpack)(void* value) = nullptr,
                         void* (*pack)(const Slice& value) = nullptr) override;
   virtual Handle* Lookup(const Slice& key, Statistics* stats,
-                          void* (*pack)(const Slice& value) = nullptr) override;
+                          void* (*pack)(const Slice& value) = nullptr,
+                          void (*deleter)(const Slice&, void* value) = nullptr) override;
   virtual bool Ref(Handle* handle) override;
   virtual bool Release(Handle* handle, bool force_erase = false) override;
   virtual void Erase(const Slice& key) override;

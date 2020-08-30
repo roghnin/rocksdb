@@ -163,7 +163,7 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
   return ret;
 }
 
-void PMDKCacheShard::FreePEntry(po::persistnent_ptr<PersistentEntry> e){
+void PMDKCacheShard::FreePEntry(po::persistent_ptr<PersistentEntry> e){
   // This must be called within a transaction, so no transaction needed here.
   // free key, val, trans_handle, the transient "coat" (Block or BlockContent) of val,
   // and persistent entry.
@@ -173,9 +173,9 @@ void PMDKCacheShard::FreePEntry(po::persistnent_ptr<PersistentEntry> e){
     // TODO: get deleter in TransientEntry and delete value here.
     delete e->trans_handle;
   }
-  po::delete_persistent(e->key);
-  po::delete_persistnet(e->val);
-  po::delete_persistent(e);
+  po::delete_persistent<char[]>(e->key, (int)e->key_size);
+  po::delete_persistent<char[]>(e->val, (int)e->val_size);
+  po::delete_persistent<PersistentEntry>(e);
 }
 
 bool PMDKCacheShard::IsLRUHandle(Cache::Handle* e){
@@ -212,7 +212,8 @@ void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit){
 }
 
 Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
-                                      void* (*pack)(const Slice& slice)) {
+                                      void* (*pack)(const Slice& slice),
+                                      void (*deleter)(const Slice&, void* value)) {
   
   MutexLock l(&mutex_);
   // TODO: lookup transient hash table
@@ -232,6 +233,7 @@ Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
 }
 
 bool PMDKCacheShard::Ref(Cache::Handle* h) {
+  // TODO: transient tier Ref.
   TransientHandle* e = reinterpret_cast<TransientHandle*>(h);
   MutexLock l(&mutex_);
   // To create another reference - entry must be already externally referenced

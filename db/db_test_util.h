@@ -747,7 +747,8 @@ class CacheWrapper : public Cache {
   }
 
   Handle* Lookup(const Slice& key, Statistics* stats = nullptr,
-                  void* /*(*pack)*/ (const Slice& value) = nullptr) override {
+                  void* /*(*pack)*/ (const Slice& value) = nullptr,
+                  void /*(*deleter)*/ (const Slice&, void* value) = nullptr) override {
     return target_->Lookup(key, stats);
   }
 
