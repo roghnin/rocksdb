@@ -64,7 +64,6 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     lru_ = pop_.root()->persistent_lru_list;
     era_ = ++pop_.root()->era;
   }
-
 }
 
 void PMDKCacheShard::EraseUnRefEntries() {
@@ -172,7 +171,7 @@ void PMDKCacheShard::FreePEntry(po::persistent_ptr<PersistentEntry> e){
 
   // free transient handle first, since the deleter may use e->key and/or e->value.
   if (e->era == era_ && e->trans_handle != nullptr){
-    e->trans_handle->deleter(Slice(e->val.get(), e->val_size), e->trans_handle->value);
+    (*e->trans_handle->deleter)(Slice(e->val.get(), e->val_size), e->trans_handle->value);
     delete e->trans_handle;
   }
   po::delete_persistent<char[]>(e->key, (int)e->key_size);
@@ -309,14 +308,11 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   
   Status s;
   Status* s_p = &s;
-
-  // TODO: insertion into transient tier, with a dummy deleter that
-  // delays the actual deletion.
-  // note that the transient charge may be underestimated since the
-  // space overhead of (*pack) is not counted. We may argue that it shouldn't be counted...
-
   autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
-  // insertion into persistent tier
+
+  // insert into persistent tier first, since failed insertion into transient tier
+  // may end up deleting value.
+
   const Slice& unpacked_val = unpack(value);
   // TODO: better estimation of persistent total charge:
   size_t persistent_charge = sizeof(PersistentEntry) + 
@@ -383,7 +379,14 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
     }
   });
 
-  // TODO: if transient tier intended to call deleter, call it here.
+  if (s != Status::OK()){
+    if (deleter){
+      (*deleter)(key, value);
+    }
+    return s;
+  }
+
+  // TODO: insert into transient tier.
 
   return s;
 }
