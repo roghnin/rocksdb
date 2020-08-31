@@ -29,15 +29,12 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                              bool use_adaptive_mutex,
                              CacheMetadataChargePolicy metadata_charge_policy)
     : capacity_(0),
-      high_pri_pool_usage_(0),
+      // TODO: set persistent_capacity dynamically.
+      persistent_capacity_(PMEMOBJ_POOL_SIZE),
       strict_capacity_limit_(strict_capacity_limit),
-      high_pri_pool_ratio_(high_pri_pool_ratio),
-      high_pri_pool_capacity_(0),
       usage_(0),
       lru_usage_(0),
-      mutex_(use_adaptive_mutex),
-      // TODO: set persistent_capacity dynamically.
-      persistent_capacity_(PMEMOBJ_POOL_SIZE) {
+      mutex_(use_adaptive_mutex) {
   set_metadata_charge_policy(metadata_charge_policy);
 
   // TODO: set up an LRUCacheShard as transient tier.
@@ -107,12 +104,6 @@ size_t PMDKCacheShard::TEST_GetLRUSize() {
   size_t lru_size = 0;
   // TODO
   return lru_size;
-}
-
-double PMDKCacheShard::GetHighPriPoolRatio() {
-  // TODO: return from transient tier.
-  MutexLock l(&mutex_);
-  return high_pri_pool_ratio_;
 }
 
 void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
@@ -264,9 +255,9 @@ bool PMDKCacheShard::Ref(Cache::Handle* h) {
   return true;
 }
 
-void PMDKCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
-  // TODO: call transient.
-}
+// void PMDKCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
+//   // TODO: call transient.
+// }
 
 bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
   if (handle == nullptr){
@@ -453,14 +444,7 @@ size_t PMDKCacheShard::GetPinnedUsage() const {
 }
 
 std::string PMDKCacheShard::GetPrintableOptions() const {
-  const int kBufferSize = 200;
-  char buffer[kBufferSize];
-  {
-    MutexLock l(&mutex_);
-    snprintf(buffer, kBufferSize, "    high_pri_pool_ratio: %.3lf\n",
-             high_pri_pool_ratio_);
-  }
-  return std::string(buffer);
+  // TODO
 }
 
 PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
@@ -536,14 +520,6 @@ size_t PMDKCache::TEST_GetLRUSize() {
   return lru_size_of_all_shards;
 }
 
-double PMDKCache::GetHighPriPoolRatio() {
-  double result = 0.0;
-  if (num_shards_ > 0) {
-    result = shards_[0].GetHighPriPoolRatio();
-  }
-  return result;
-}
-
 std::shared_ptr<Cache> NewPMDKCache(const LRUCacheOptions& cache_opts) {
   return NewPMDKCache(cache_opts.capacity, cache_opts.num_shard_bits,
                      cache_opts.strict_capacity_limit,
@@ -560,10 +536,10 @@ std::shared_ptr<Cache> NewPMDKCache(
   if (num_shard_bits >= 20) {
     return nullptr;  // the cache cannot be sharded into too many fine pieces
   }
-  if (high_pri_pool_ratio < 0.0 || high_pri_pool_ratio > 1.0) {
-    // invalid high_pri_pool_ratio
-    return nullptr;
-  }
+  // if (high_pri_pool_ratio < 0.0 || high_pri_pool_ratio > 1.0) {
+  //   // invalid high_pri_pool_ratio
+  //   return nullptr;
+  // }
   if (num_shard_bits < 0) {
     num_shard_bits = GetDefaultCacheShardBits(capacity);
   }

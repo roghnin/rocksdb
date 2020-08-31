@@ -225,9 +225,6 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   //  not threadsafe
   size_t TEST_GetLRUSize();
 
-  //  Retrives high pri pool ratio
-  double GetHighPriPoolRatio();
-
  private:
   void LRU_Remove(po::persistent_ptr<PersistentEntry> e);
   void LRU_Insert(po::persistent_ptr<PersistentEntry> e);
@@ -253,26 +250,13 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   size_t capacity_;
   size_t persistent_capacity_;
 
-  // Memory size for entries in high-pri pool.
-  size_t high_pri_pool_usage_;
-
   // Whether to reject insertion if cache reaches its full capacity.
   bool strict_capacity_limit_;
-
-  // Ratio of capacity reserved for high priority cache entries.
-  double high_pri_pool_ratio_;
-
-  // High-pri pool size, equals to capacity * high_pri_pool_ratio.
-  // Remember the value to avoid recomputing each time.
-  double high_pri_pool_capacity_;
 
   // Dummy head of persistent LRU list.
   // lru->prev_lru is newest entry, lru->next_lru is oldest entry.
   // LRU contains items which can be evicted, ie reference only by cache
   po::persistent_ptr<PersistentEntry> lru_;
-
-  // Pointer to head of low-pri pool in LRU list.
-  TransientHandle* lru_low_pri_;
 
   // This is a concurrent persistent container provided by PMDK.
   // TODO: make this an instance rather than a pointer.
@@ -334,8 +318,6 @@ class PMDKCache
 
   //  Retrieves number of elements in LRU, for unit test purpose only
   size_t TEST_GetLRUSize();
-  //  Retrives high pri pool ratio
-  double GetHighPriPoolRatio();
 
  private:
   PMDKCacheShard* shards_ = nullptr;
