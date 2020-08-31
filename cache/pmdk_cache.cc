@@ -67,7 +67,28 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
 }
 
 void PMDKCacheShard::EraseUnRefEntries() {
-  // TODO
+  // TODO: call transient.
+  po::transaction::run(pop_, [&] {
+    autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
+    {
+      MutexLock l(&mutex_);
+      while(lru_->next_lru != lru_) {
+        po::persistent_ptr<PersistentEntry> old = lru_->next_lru;
+        // LRU list contains only elements which can be evicted
+        assert(old->InCache() && !old->HasRefs());
+        LRU_Remove(old);
+        persistent_hashtable_->Remove(old);
+        old->SetInCache(false);
+        size_t total_charge = old->persist_charge;
+        assert(usage_ >= total_charge);
+        usage_ -= total_charge;
+        last_reference_list.push_back(old);
+      }
+    }
+    for (auto entry : last_reference_list) {
+      FreePEntry(entry);
+    }
+  });
 }
 
 void PMDKCacheShard::ApplyToAllCacheEntries(void (*callback)(void*, size_t),
