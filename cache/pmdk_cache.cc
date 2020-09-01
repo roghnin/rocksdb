@@ -408,7 +408,7 @@ void PMDKCacheShard::Erase(const Slice& key, uint32_t hash) {
 
   // erase from persistent tier
   po::transaction::run(pop_, [&, key, hash] {
-    bool last_reference;
+    bool last_reference = false;
     po::persistent_ptr<PersistentEntry> e;
     {
       MutexLock l(&mutex_);
