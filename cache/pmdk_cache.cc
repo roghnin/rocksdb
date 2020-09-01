@@ -280,22 +280,25 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
     last_reference = false;
   } else {
     bool* last_reference_p = &last_reference;
-    po::transaction::run(pop_, [&, handle, force_erase, last_reference_p] {
-      TransientHandle* e = reinterpret_cast<TransientHandle*>(handle);
+    TransientHandle* e = reinterpret_cast<TransientHandle*>(handle);
+    po::transaction::run(pop_, [&, e, force_erase, last_reference_p] {
       {
         MutexLock l(&mutex_);
         *last_reference_p = e->Unref();
         if (*last_reference_p && e->p_entry->InCache()) {
+          po::persistent_ptr<PersistentEntry> pe =
+            persistent_hashtable_->Lookup(e->key(), e->hash);
+          assert(pe != nullptr);
           // The item is still in cache, and nobody else holds a reference to it
           if (usage_ > persistent_capacity_ || force_erase){
             // The LRU list must be empty since the cache is full
             assert(lru_->next_lru == lru_ || force_erase);
             // Take this opportunity and remove the item
-            persistent_hashtable_->Remove(e->p_entry);
-            e->p_entry->SetInCache(false);
+            persistent_hashtable_->Remove(pe);
+            pe->SetInCache(false);
           } else {
             // Put the item back on the LRU list, and don't free it
-            LRU_Insert(e->p_entry);
+            LRU_Insert(pe);
             *last_reference_p = false;
           }
         }
@@ -344,6 +347,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           if (handle != nullptr) {
             *handle = nullptr;
             *s_p = Status::Incomplete("Insert failed due to LRU cache being full.");
+            assert(false);
           }
           // else, do nothing here and pretend the insertion succeeded but entry got
           // kicked out immediately.
