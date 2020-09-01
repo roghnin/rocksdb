@@ -9,15 +9,17 @@
 
 #include "cache/pmdk_cache.h"
 
+#include <experimental/filesystem>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
 
+
 #include "util/mutexlock.h"
 
 // TODO: make these run-time variables
-#define PHEAP_PATH "/dev/shm/pmdk_cache"
+#define PHEAP_PATH "/dev/shm/pmdk_cache/"
 #define PMEMOBJ_POOL_SIZE (size_t)(1024*1024*1024)
 
 
@@ -27,7 +29,8 @@ namespace ROCKSDB_NAMESPACE {
 PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                              double high_pri_pool_ratio,
                              bool use_adaptive_mutex,
-                             CacheMetadataChargePolicy metadata_charge_policy)
+                             CacheMetadataChargePolicy metadata_charge_policy,
+                             size_t shard_id)
     : capacity_(0),
       // TODO: set persistent_capacity dynamically.
       persistent_capacity_(PMEMOBJ_POOL_SIZE),
@@ -41,23 +44,23 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
 
   // Set up persistent memory pool (pop)
   // TODO: use an alternative to access() that works on all platforms.
-  if (access(PHEAP_PATH, F_OK) != 0){
+  std::string heap_file = PHEAP_PATH + std::to_string(shard_id);
+  if (access(heap_file.c_str(), F_OK) != 0){
     // TODO: name pool with shard id.
-    pop_ = po::pool<PersistentRoot>::create(PHEAP_PATH, "pmdk_cache_pool", PMEMOBJ_POOL_SIZE, S_IRWXU);
+    pop_ = po::pool<PersistentRoot>::create(heap_file, "pmdk_cache_pool", PMEMOBJ_POOL_SIZE, S_IRWXU);
     PersistentRoot* root = pop_.root().get();
     po::transaction::run(pop_, [&, root] {
-      root->persistent_hashtable = po::make_persistent<PHashTableType>();
+      root->persistent_hashtable = po::make_persistent<PersistTierHashTable>(&pop_);
       root->persistent_lru_list = po::make_persistent<PersistentEntry>();
       root->era = 0;
-      // TDOO: make this a move construction.
-      persistent_hashtable_ = new PersistTierHashTable(root->persistent_hashtable);
+      persistent_hashtable_ = root->persistent_hashtable.get();
       lru_ = root->persistent_lru_list;
     });
     era_ = 0;
   } else {
-    pop_ = po::pool<PersistentRoot>::open(PHEAP_PATH, "pmdk_cache_pool");
-    // TDOO: make this a move construction.
-    persistent_hashtable_ = new PersistTierHashTable(pop_.root()->persistent_hashtable);
+    pop_ = po::pool<PersistentRoot>::open(heap_file, "pmdk_cache_pool");
+    persistent_hashtable_ = pop_.root()->persistent_hashtable.get();
+    persistent_hashtable_->SetPop(&pop_);
     lru_ = pop_.root()->persistent_lru_list;
     era_ = ++pop_.root()->era;
   }
@@ -317,7 +320,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              Cache::Handle** handle, Cache::Priority priority,
                              const Slice (*unpack)(void* packed),
                              void* (*pack)(const Slice& value)) {
-  
+
   Status s;
   Status* s_p = &s;
   autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
@@ -325,79 +328,84 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   // insert into persistent tier first, since failed insertion into transient tier
   // may end up deleting value.
 
-  const Slice& unpacked_val = unpack(value);
-  // TODO: better estimation of persistent total charge:
-  size_t persistent_charge = sizeof(PersistentEntry) + 
-                              key.size() + 
-                              unpacked_val.size() + 
-                              // rough estimation of hash map entry: cache line size,
-                              // since each hash map node requires its mutex padded
-                              // to cache line.
-                              _SC_LEVEL2_CACHE_LINESIZE;
+  if (unpack != nullptr){
+    assert(deleter != nullptr && pack != nullptr);
+    const Slice& unpacked_val = unpack(value);
+    // TODO: better estimation of persistent total charge:
+    size_t persistent_charge = sizeof(PersistentEntry) + 
+                                key.size() + 
+                                unpacked_val.size() + 
+                                // rough estimation of hash map entry: cache line size,
+                                // since each hash map node requires its mutex padded
+                                // to cache line.
+                                _SC_LEVEL2_CACHE_LINESIZE;
 
-  po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack] {
-    {
-      MutexLock l(&mutex_);
-      EvictFromLRU(persistent_charge, &last_reference_list);
-      // TODO: calculate charge and refuse insert if cache is full
-      if ((usage_ + persistent_charge) > persistent_capacity_){
-        if (handle != nullptr) {
-          *handle = nullptr;
-          *s_p = Status::Incomplete("Insert failed due to LRU cache being full.");
-        }
-        // else, do nothing here and pretend the insertion succeeded but entry got
-        // kicked out immediately.
-      } else {
-        // create new persistent entry
-        auto p_entry = po::make_persistent<PersistentEntry>();
-        p_entry->persist_charge = persistent_charge;
-        p_entry->key_size = key.size();
-        p_entry->key = po::make_persistent<char[]>(key.size());
-        p_entry->val_size = unpacked_val.size();
-        p_entry->val = po::make_persistent<char[]>(unpacked_val.size());
-        p_entry->hash = hash;
-        // memcpy from transient to persistent tier
-        pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
-        pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
-        // insert persistent entry into hash table.
-        po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(hash, key, p_entry);
-        usage_ += persistent_charge;
-        if (old != nullptr){
-          *s_p = Status::OkOverwritten();
-          assert(old->InCache());
-          old->SetInCache(false);
-          if (!old->HasRefs()){
-            LRU_Remove(old);
-            size_t old_persist_charge = old->persist_charge;
-            assert(usage_ >= old_persist_charge);
-            usage_ -= old_persist_charge;
-            last_reference_list.push_back(old);
+    po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack] {
+      {
+        MutexLock l(&mutex_);
+        EvictFromLRU(persistent_charge, &last_reference_list);
+        // TODO: calculate charge and refuse insert if cache is full
+        if ((usage_ + persistent_charge) > persistent_capacity_){
+          if (handle != nullptr) {
+            *handle = nullptr;
+            *s_p = Status::Incomplete("Insert failed due to LRU cache being full.");
+          }
+          // else, do nothing here and pretend the insertion succeeded but entry got
+          // kicked out immediately.
+        } else {
+          // create new persistent entry
+          auto p_entry = po::make_persistent<PersistentEntry>();
+          p_entry->persist_charge = persistent_charge;
+          p_entry->key_size = key.size();
+          p_entry->key = po::make_persistent<char[]>(key.size());
+          p_entry->val_size = unpacked_val.size();
+          p_entry->val = po::make_persistent<char[]>(unpacked_val.size());
+          p_entry->hash = hash;
+          // memcpy from transient to persistent tier
+          pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
+          pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
+          // insert persistent entry into hash table.
+          po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(hash, key, p_entry);
+          usage_ += persistent_charge;
+          if (old != nullptr){
+            *s_p = Status::OkOverwritten();
+            assert(old->InCache());
+            old->SetInCache(false);
+            if (!old->HasRefs()){
+              LRU_Remove(old);
+              size_t old_persist_charge = old->persist_charge;
+              assert(usage_ >= old_persist_charge);
+              usage_ -= old_persist_charge;
+              last_reference_list.push_back(old);
+            }
+          }
+          if (handle == nullptr){
+            LRU_Insert(p_entry);
+          } else {
+            // TODO: don't do this when insertion into transient tier
+            // is successful. Always insert into LRU instead.
+            TransientHandle* e = GetTransientHandle(p_entry, pack, deleter);
+            e->Ref();
+            *handle = reinterpret_cast<Cache::Handle*>(e);
           }
         }
-        if (handle == nullptr){
-          LRU_Insert(p_entry);
-        } else {
-          // TODO: don't do this when insertion into transient tier
-          // is successful. Always insert into LRU instead.
-          TransientHandle* e = GetTransientHandle(p_entry, pack, deleter);
-          e->Ref();
-          *handle = reinterpret_cast<Cache::Handle*>(e);
-        }
       }
-    }
-    // Free the entries here outside of mutex for performance reasons
-    for (auto entry : last_reference_list) {
-      FreePEntry(entry);
-    }
-  });
+      // Free the entries here outside of mutex for performance reasons
+      for (auto entry : last_reference_list) {
+        FreePEntry(entry);
+      }
+    });
 
-  if (s != Status::OK()){
-    if (deleter){
-      (*deleter)(key, value);
+    if (s != Status::OK()){
+      if (deleter){
+        (*deleter)(key, value);
+      }
+      return s;
     }
-    return s;
   }
 
+
+  
   // TODO: insert into transient tier.
 
   return s;
@@ -458,10 +466,11 @@ PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
   shards_ = reinterpret_cast<PMDKCacheShard*>(
       port::cacheline_aligned_alloc(sizeof(PMDKCacheShard) * num_shards_));
   size_t per_shard = (capacity + (num_shards_ - 1)) / num_shards_;
+  // TODO: create directory `PHEAP_PATH` here.
   for (int i = 0; i < num_shards_; i++) {
     new (&shards_[i])
         PMDKCacheShard(per_shard, strict_capacity_limit, high_pri_pool_ratio,
-                      use_adaptive_mutex, metadata_charge_policy);
+                      use_adaptive_mutex, metadata_charge_policy, (size_t)i);
   }
 }
 

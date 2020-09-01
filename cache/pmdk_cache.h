@@ -108,9 +108,17 @@ struct PersistentEntry{
   }
 };
 
-using PHashTableType = po::concurrent_hash_map<po::p<uint32_t>, po::persistent_ptr<PersistentEntry>>;
+class PersistentRoot;
+
 class PersistTierHashTable{
-  po::persistent_ptr<PHashTableType> table_;
+  po::persistent_ptr<po::persistent_ptr<PersistentEntry>[]> list_;
+  po::p<uint32_t> length_;
+  po::p<uint32_t> elems_;
+
+  // pop_ is transient. it gets reset during pmdk cache's construction.
+  // TODO: protect this with era number.
+  po::pool<PersistentRoot>* pop_;
+
   bool KeyEqual(const char* data, size_t size, po::persistent_ptr<PersistentEntry> entry){
     if (size != entry->key_size){
       return false;
@@ -118,22 +126,47 @@ class PersistTierHashTable{
     return (memcmp(data, entry->key.get(), size) == 0);
   }
   po::persistent_ptr<PersistentEntry>* FindPointer(const Slice& key, uint32_t hash){
-    po::persistent_ptr<PersistentEntry>* ptr;
-    PHashTableType::accessor acc;
-    bool res = table_->find(acc, hash);
-    if (res){
-      ptr = &acc->second;
-      while(*ptr != nullptr && (!KeyEqual(key.data(), key.size(), (*ptr)))) {
-        ptr = &(*ptr)->next_hash;
-      }
-    } else {
-      table_->insert(acc, PHashTableType::value_type(hash, nullptr));
-      ptr = &acc->second;
+    po::persistent_ptr<PersistentEntry>* ptr = &list_[hash & (length_-1)];
+    while(*ptr != nullptr && ((*ptr)->hash != hash) || !KeyEqual(key.data(), key.size(), (*ptr))) {
+      ptr = &(*ptr)->next_hash;
     }
     return ptr;
   }
+
+  void Resize(){
+    uint32_t new_length = 16;
+    while(new_length < elems_ * 1.5){
+      new_length *= 2;
+    }
+    po::persistent_ptr<po::persistent_ptr<PersistentEntry>[]> new_list = 
+      po::make_persistent<po::persistent_ptr<PersistentEntry>[]>(new_length);
+    pop_->memset_persist(new_list.get(), 0, sizeof(new_list[0]) * new_length);
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < length_; i++){
+      po::persistent_ptr<PersistentEntry> h = list_[i];
+      while(h != nullptr){
+        po::persistent_ptr<PersistentEntry> next = h->next_hash;
+        uint32_t hash = h->hash;
+        po::persistent_ptr<PersistentEntry>* ptr = &new_list[hash & (new_length - 1)];
+        h->next_hash = *ptr;
+        *ptr = h;
+        h = next;
+        count++;
+      }
+    }
+    assert(elems_ == count);
+    po::delete_persistent<po::persistent_ptr<PersistentEntry>[]>(list_, length_);
+    list_ = new_list;
+    length_ = new_length;
+  }
 public:
-  PersistTierHashTable(po::persistent_ptr<PHashTableType> table) : table_(table) {}
+  PersistTierHashTable(po::pool<PersistentRoot>* pop) :
+    list_(nullptr), length_(0), elems_(0), pop_(pop) {}
+
+  void SetPop(po::pool<PersistentRoot>* pop){
+    // TODO: set/update era number
+    pop_ = pop;
+  }
 
   po::persistent_ptr<PersistentEntry> Insert(
       uint32_t hash, const Slice& key, po::persistent_ptr<PersistentEntry> entry){
@@ -141,8 +174,15 @@ public:
     po::persistent_ptr<PersistentEntry> old = *ptr;
     entry->next_hash = (old == nullptr ? nullptr : old->next_hash);
     *ptr = entry;
+    if (old == nullptr) {
+      ++elems_;
+      if (elems_ > length_){
+        Resize();
+      }
+    }
     return old;
   }
+
   po::persistent_ptr<PersistentEntry> Lookup(const Slice& key, uint32_t hash){
     return (*FindPointer(key, hash));
   }
@@ -153,6 +193,7 @@ public:
     po::persistent_ptr<PersistentEntry> result = *ptr;
     if (result != nullptr){
       *ptr = result->next_hash;
+      --elems_;
     }
     return result;
   }
@@ -164,7 +205,7 @@ public:
 };
 
 struct PersistentRoot{
-  po::persistent_ptr<PHashTableType> persistent_hashtable;
+  po::persistent_ptr<PersistTierHashTable> persistent_hashtable;
   po::persistent_ptr<PersistentEntry> persistent_lru_list;
   po::p<size_t> era;
 };
@@ -174,7 +215,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
  public:
   PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                 double high_pri_pool_ratio, bool use_adaptive_mutex,
-                CacheMetadataChargePolicy metadata_charge_policy);
+                CacheMetadataChargePolicy metadata_charge_policy,
+                size_t shard_id);
   ~PMDKCacheShard() override = default;
 
   // Separate from constructor so caller can easily make an array of PMDKCache
