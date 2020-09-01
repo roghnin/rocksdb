@@ -110,8 +110,8 @@ size_t PMDKCacheShard::TEST_GetLRUSize() {
 }
 
 void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
-  assert(e->next_lru != nullptr);
-  assert(e->prev_lru != nullptr);
+  assert(e->next_lru.get() != nullptr);
+  assert(e->prev_lru.get() != nullptr);
   po::transaction::run(pop_, [&, e] {
     e->next_lru->prev_lru = e->prev_lru;
     e->prev_lru->next_lru = e->next_lru;
@@ -123,8 +123,8 @@ void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
 }
 
 void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
-  assert(e->next_lru == nullptr);
-  assert(e->prev_lru == nullptr);
+  assert(e->next_lru.get() == nullptr);
+  assert(e->prev_lru.get() == nullptr);
   po::transaction::run(pop_, [&, e] {
     // Inset "e" to head of LRU list.
     e->next_lru = lru_;
@@ -154,7 +154,7 @@ void PMDKCacheShard::EvictFromLRU(size_t charge,
 TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<PersistentEntry> e,
                                             void* (*pack)(const Slice& slice),
                                             void (*deleter)(const Slice& key, void* value)){
-  if (e == nullptr){
+  if (e.get() == nullptr){
     return nullptr;
   }
   // TODO: this transaction might not be necessary if the underlying NVM has word-level
@@ -184,6 +184,7 @@ void PMDKCacheShard::FreePEntry(po::persistent_ptr<PersistentEntry> e){
   // free key, val, trans_handle, the transient "coat" (Block or BlockContent) of val,
   // and persistent entry.
 
+  assert(e.get() != nullptr);
   // free transient handle first, since the deleter may use e->key and/or e->value.
   if (e->era == era_ && e->trans_handle != nullptr){
     (*e->trans_handle->deleter)(Slice(e->val.get(), e->val_size), e->trans_handle->value);
@@ -237,7 +238,7 @@ Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
   // lookup persistent table:
   po::persistent_ptr<PersistentEntry> e = persistent_hashtable_->Lookup(key, hash);
   TransientHandle* th = nullptr;
-  if (e != nullptr){
+  if (e.get() != nullptr){
     th = GetTransientHandle(e, pack, deleter);
     assert(e->InCache());
     if (!e->HasRefs()){
@@ -340,7 +341,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                                 // to cache line.
                                 _SC_LEVEL2_CACHE_LINESIZE;
 
-    po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack] {
+    po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack, key] {
       {
         MutexLock l(&mutex_);
         EvictFromLRU(persistent_charge, &last_reference_list);
@@ -365,29 +366,29 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
           pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
           // insert persistent entry into hash table.
-          po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(hash, key, p_entry);
-          usage_ += persistent_charge;
-          if (old != nullptr){
-            *s_p = Status::OkOverwritten();
-            assert(old->InCache());
-            old->SetInCache(false);
-            if (!old->HasRefs()){
-              LRU_Remove(old);
-              size_t old_persist_charge = old->persist_charge;
-              assert(usage_ >= old_persist_charge);
-              usage_ -= old_persist_charge;
-              last_reference_list.push_back(old);
-            }
-          }
-          if (handle == nullptr){
-            LRU_Insert(p_entry);
-          } else {
-            // TODO: don't do this when insertion into transient tier
-            // is successful. Always insert into LRU instead.
-            TransientHandle* e = GetTransientHandle(p_entry, pack, deleter);
-            e->Ref();
-            *handle = reinterpret_cast<Cache::Handle*>(e);
-          }
+          po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(hash, p_entry);
+          // usage_ += persistent_charge;
+          // if (old.get() != nullptr){
+          //   *s_p = Status::OkOverwritten();
+          //   assert(old->InCache());
+          //   old->SetInCache(false);
+          //   if (!old->HasRefs()){
+          //     LRU_Remove(old);
+          //     size_t old_persist_charge = old->persist_charge;
+          //     assert(usage_ >= old_persist_charge);
+          //     usage_ -= old_persist_charge;
+          //     last_reference_list.push_back(old);
+          //   }
+          // }
+          // if (handle == nullptr){
+          //   LRU_Insert(p_entry);
+          // } else {
+          //   // TODO: don't do this when insertion into transient tier
+          //   // is successful. Always insert into LRU instead.
+          //   TransientHandle* e = GetTransientHandle(p_entry, pack, deleter);
+          //   e->Ref();
+          //   *handle = reinterpret_cast<Cache::Handle*>(e);
+          // }
         }
       }
       // Free the entries here outside of mutex for performance reasons
@@ -404,10 +405,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
     }
   }
 
-
-  
   // TODO: insert into transient tier.
-
   return s;
 }
 
@@ -421,7 +419,7 @@ void PMDKCacheShard::Erase(const Slice& key, uint32_t hash) {
     {
       MutexLock l(&mutex_);
       e = persistent_hashtable_->Remove(key, hash);
-      if (e != nullptr) {
+      if (e.get() != nullptr) {
         assert(e->InCache());
         e->SetInCache(false);
         if (!e->HasRefs()){

@@ -116,7 +116,7 @@ class PersistTierHashTable{
   po::p<uint32_t> elems_;
 
   // pop_ is transient. it gets reset during pmdk cache's construction.
-  // TODO: protect this with era number.
+  // TODO: protect this with era number. (maybe not necessary.)
   po::pool<PersistentRoot>* pop_;
 
   bool KeyEqual(const char* data, size_t size, po::persistent_ptr<PersistentEntry> entry){
@@ -127,7 +127,7 @@ class PersistTierHashTable{
   }
   po::persistent_ptr<PersistentEntry>* FindPointer(const Slice& key, uint32_t hash){
     po::persistent_ptr<PersistentEntry>* ptr = &list_[hash & (length_-1)];
-    while(*ptr != nullptr && ((*ptr)->hash != hash) || !KeyEqual(key.data(), key.size(), (*ptr))) {
+    while((*ptr) != nullptr && ((*ptr)->hash != hash || !KeyEqual(key.data(), key.size(), (*ptr)))) {
       ptr = &(*ptr)->next_hash;
     }
     return ptr;
@@ -144,7 +144,7 @@ class PersistTierHashTable{
     uint32_t count = 0;
     for (uint32_t i = 0; i < length_; i++){
       po::persistent_ptr<PersistentEntry> h = list_[i];
-      while(h != nullptr){
+      while(h.get() != nullptr){
         po::persistent_ptr<PersistentEntry> next = h->next_hash;
         uint32_t hash = h->hash;
         po::persistent_ptr<PersistentEntry>* ptr = &new_list[hash & (new_length - 1)];
@@ -161,7 +161,9 @@ class PersistTierHashTable{
   }
 public:
   PersistTierHashTable(po::pool<PersistentRoot>* pop) :
-    list_(nullptr), length_(0), elems_(0), pop_(pop) {}
+    list_(nullptr), length_(0), elems_(0), pop_(pop) {
+    Resize();
+  }
 
   void SetPop(po::pool<PersistentRoot>* pop){
     // TODO: set/update era number
@@ -302,7 +304,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
 
   // This is a concurrent persistent container provided by PMDK.
   // TODO: make this an instance rather than a pointer.
-  PersistTierHashTable* persistent_hashtable_;
+  po::persistent_ptr<PersistTierHashTable> persistent_hashtable_;
 
   // Current era number. Advanced every crash.
   size_t era_;
