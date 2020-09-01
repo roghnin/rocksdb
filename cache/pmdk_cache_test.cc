@@ -60,7 +60,7 @@ class PMDKCacheTest : public testing::Test {
   }
 
   bool Lookup(const std::string& key) {
-    auto handle = cache_->Lookup(key, 0 /*hash*/);
+    auto handle = cache_->Lookup(key, 0 /*hash*/, &ValuePack, &ValueDeleter);
     if (handle) {
       cache_->Release(handle);
       return true;
@@ -103,20 +103,20 @@ TEST_F(PMDKCacheTest, BasicLRU) {
     Insert(payloads2[i]);
   }
   ValidateLRUList({"d", "e", "x", "y", "z"});
-  // ASSERT_FALSE(Lookup("b"));
-  // ValidateLRUList({"d", "e", "x", "y", "z"});
-  // ASSERT_TRUE(Lookup("e"));
-  // ValidateLRUList({"d", "x", "y", "z", "e"});
-  // ASSERT_TRUE(Lookup("z"));
-  // ValidateLRUList({"d", "x", "y", "e", "z"});
-  // Erase("x");
-  // ValidateLRUList({"d", "y", "e", "z"});
-  // ASSERT_TRUE(Lookup("d"));
-  // ValidateLRUList({"y", "e", "z", "d"});
-  // Insert("u");
-  // ValidateLRUList({"y", "e", "z", "d", "u"});
-  // Insert("v");
-  // ValidateLRUList({"e", "z", "d", "u", "v"});
+  ASSERT_FALSE(Lookup("b"));
+  ValidateLRUList({"d", "e", "x", "y", "z"});
+  ASSERT_TRUE(Lookup("e"));
+  ValidateLRUList({"d", "x", "y", "z", "e"});
+  ASSERT_TRUE(Lookup("z"));
+  ValidateLRUList({"d", "x", "y", "e", "z"});
+  Erase("x");
+  ValidateLRUList({"d", "y", "e", "z"});
+  ASSERT_TRUE(Lookup("d"));
+  ValidateLRUList({"y", "e", "z", "d"});
+  Insert("u");
+  ValidateLRUList({"y", "e", "z", "d", "u"});
+  Insert("v");
+  ValidateLRUList({"e", "z", "d", "u", "v"});
 }
 
 }  // namespace ROCKSDB_NAMESPACE
