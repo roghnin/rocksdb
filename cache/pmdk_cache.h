@@ -262,6 +262,11 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
 
   std::string GetPrintableOptions() const override;
 
+  // Tell apart LRUHandle and TransientHandle by looking at the second word.
+  // The second word of LRUHandle is function pointer, either null or an address
+  // The second word of TransientHandle will always be 0x1.
+  static bool IsLRUHandle(Cache::Handle* e);
+
   void TEST_GetLRUList(PersistentEntry** lru);
 
   //  Retrieves number of elements in LRU, for unit test purpose only
@@ -277,11 +282,6 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
                                       void (*deleter)(const Slice& key, void* value));
 
   void FreePEntry(po::persistent_ptr<PersistentEntry> e);
-
-  // Tell apart LRUHandle and TransientHandle by looking at the second word.
-  // The second word of LRUHandle is function pointer, either null or an address
-  // The second word of TransientHandle will always be 0x1.
-  bool IsLRUHandle(Cache::Handle* e);
 
   // Free some space following strict LRU policy until enough space
   // to hold (usage_ + charge) is freed or the lru list is empty
