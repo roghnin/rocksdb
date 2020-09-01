@@ -164,6 +164,14 @@ void deleter(const Slice& /*key*/, void* value) {
 }
 }  // namespace
 
+const Slice unpack(void* value){
+  return Slice((char*)value, FLAGS_value_bytes);
+}
+
+void* pack(const Slice& value){
+  return const_cast<char*>(value.data());
+}
+
 class CacheBench {
   static constexpr uint64_t kHundredthUint64 =
       std::numeric_limits<uint64_t>::max() / 100U;
@@ -191,7 +199,7 @@ class CacheBench {
         exit(1);
       }
     } else if (FLAGS_use_pmdk_cache) {
-      cache_ = NewPMDKCache(FLAGS_cache_size + 1024, FLAGS_num_shard_bits);
+      cache_ = NewPMDKCache(0, FLAGS_cache_size + 1024, FLAGS_num_shard_bits);
       // TODO: get rid of those hard-coded numbers.
       max_key_ = static_cast<uint64_t>(FLAGS_cache_size / FLAGS_resident_ratio /
                                        (FLAGS_value_bytes + 8 + 152));
@@ -210,7 +218,8 @@ class CacheBench {
     KeyGen keygen;
     for (uint64_t i = 0; i < 2 * FLAGS_cache_size; i += FLAGS_value_bytes) {
       cache_->Insert(keygen.GetRand(rnd, max_key_), createValue(rnd),
-                     FLAGS_value_bytes, &deleter);
+                     FLAGS_value_bytes, &deleter, nullptr /*handle*/,
+                     Cache::Priority::LOW, &unpack, &pack);
     }
   }
 
@@ -300,7 +309,7 @@ class CacheBench {
           handle = nullptr;
         }
         // do lookup
-        handle = cache_->Lookup(key);
+        handle = cache_->Lookup(key, nullptr /*stats*/, &pack, &deleter);
         if (handle) {
           // do something with the data
           result += NPHash64(static_cast<char*>(cache_->Value(handle)),
@@ -308,7 +317,7 @@ class CacheBench {
         } else {
           // do insert
           cache_->Insert(key, createValue(thread->rnd), FLAGS_value_bytes,
-                         &deleter, &handle);
+                         &deleter, &handle, Cache::Priority::LOW, &unpack, &pack);
         }
       } else if (random_op < insert_threshold_) {
         if (handle) {
@@ -317,14 +326,14 @@ class CacheBench {
         }
         // do insert
         cache_->Insert(key, createValue(thread->rnd), FLAGS_value_bytes,
-                       &deleter, &handle);
+                       &deleter, &handle, Cache::Priority::LOW, &unpack, &pack);
       } else if (random_op < lookup_threshold_) {
         if (handle) {
           cache_->Release(handle);
           handle = nullptr;
         }
         // do lookup
-        handle = cache_->Lookup(key);
+        handle = cache_->Lookup(key, nullptr /*stats*/, &pack, &deleter);
         if (handle) {
           // do something with the data
           result += NPHash64(static_cast<char*>(cache_->Value(handle)),

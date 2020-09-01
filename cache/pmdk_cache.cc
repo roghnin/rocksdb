@@ -167,6 +167,7 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
   TransientHandle* ret = e->trans_handle;
   if (!ret){
     // build a TransientHandle.
+    assert(deleter != nullptr);
     ret = new TransientHandle();
     ret->key_data = e->key.get();
     ret->key_length = e->key_size;
@@ -390,6 +391,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
         FreePEntry(entry);
       }
     });
+    // TODO: insert into transient tier.
 
     if (s != Status::OK()){
       if (deleter){
@@ -399,7 +401,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
     }
   }
 
-  // TODO: insert into transient tier.
+  
   return s;
 }
 

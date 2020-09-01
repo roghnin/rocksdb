@@ -57,7 +57,7 @@ Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/,
                                     void* (*pack)(const Slice& value),
                                     void (*deleter)(const Slice&, void* value)) {
   uint32_t hash = HashSlice(key);
-  return GetShard(Shard(hash))->Lookup(key, hash, pack);
+  return GetShard(Shard(hash))->Lookup(key, hash, pack, deleter);
 }
 
 bool ShardedCache::Ref(Handle* handle) {
