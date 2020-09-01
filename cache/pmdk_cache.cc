@@ -30,10 +30,10 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                              double high_pri_pool_ratio,
                              bool use_adaptive_mutex,
                              CacheMetadataChargePolicy metadata_charge_policy,
-                             size_t shard_id)
-    : capacity_(0),
+                             size_t persist_capacity, size_t shard_id)
+    : capacity_(capacity),
       // TODO: set persistent_capacity dynamically.
-      persistent_capacity_(PMEMOBJ_POOL_SIZE),
+      persistent_capacity_(persist_capacity),
       strict_capacity_limit_(strict_capacity_limit),
       usage_(0),
       lru_usage_(0),
@@ -98,11 +98,9 @@ void PMDKCacheShard::ApplyToAllCacheEntries(void (*callback)(void*, size_t),
   // TODO
 }
 
-void PMDKCacheShard::TEST_GetLRUList(TransientHandle** lru, TransientHandle** lru_low_pri) {
-  // MutexLock l(&mutex_);
-  // *lru = &lru_;
-  // *lru_low_pri = lru_low_pri_;
-  // TODO
+void PMDKCacheShard::TEST_GetLRUList(PersistentEntry** lru) {
+  MutexLock l(&mutex_);
+  *lru = lru_.get();
 }
 
 size_t PMDKCacheShard::TEST_GetLRUSize() {
@@ -334,10 +332,8 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   if (unpack != nullptr){
     assert(deleter != nullptr && pack != nullptr);
     const Slice& unpacked_val = unpack(value);
-    size_t persistent_charge = sizeof(PersistentEntry) + 
-                                key.size() + 
-                                unpacked_val.size() + 
-                                sizeof(po::persistent_ptr<PersistentEntry>);
+    size_t persistent_charge =  PMDKCache::GetBasePersistCharge()
+                                + key.size() + unpacked_val.size();
 
     po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack, key] {
       {
@@ -360,6 +356,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           p_entry->val_size = unpacked_val.size();
           p_entry->val = po::make_persistent<char[]>(unpacked_val.size());
           p_entry->hash = hash;
+          p_entry->SetInCache(true);
           // memcpy from transient to persistent tier
           pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
           pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
@@ -453,6 +450,7 @@ std::string PMDKCacheShard::GetPrintableOptions() const {
 
 PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
                    bool strict_capacity_limit, double high_pri_pool_ratio,
+                   size_t persist_capacity,
                    std::shared_ptr<MemoryAllocator> allocator,
                    bool use_adaptive_mutex,
                    CacheMetadataChargePolicy metadata_charge_policy)
@@ -462,11 +460,13 @@ PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
   shards_ = reinterpret_cast<PMDKCacheShard*>(
       port::cacheline_aligned_alloc(sizeof(PMDKCacheShard) * num_shards_));
   size_t per_shard = (capacity + (num_shards_ - 1)) / num_shards_;
+  size_t per_shard_persist = (persist_capacity + (num_shards_ - 1)) / num_shards_;
   // TODO: create directory `PHEAP_PATH` here.
   for (int i = 0; i < num_shards_; i++) {
     new (&shards_[i])
         PMDKCacheShard(per_shard, strict_capacity_limit, high_pri_pool_ratio,
-                      use_adaptive_mutex, metadata_charge_policy, (size_t)i);
+                      use_adaptive_mutex, metadata_charge_policy,
+                      per_shard_persist, (size_t)i);
   }
 }
 
@@ -490,6 +490,10 @@ const CacheShard* PMDKCache::GetShard(int shard) const {
 
 void* PMDKCache::Value(Handle* handle) {
   return reinterpret_cast<const TransientHandle*>(handle)->value;
+}
+
+size_t PMDKCache::GetBasePersistCharge(){
+  return sizeof(PersistentEntry) + sizeof(po::persistent_ptr<PersistentEntry>);
 }
 
 size_t PMDKCache::GetCharge(Handle* handle) const {
@@ -548,8 +552,11 @@ std::shared_ptr<Cache> NewPMDKCache(
   if (num_shard_bits < 0) {
     num_shard_bits = GetDefaultCacheShardBits(capacity);
   }
+  // TODO: make this dynamic:
+  size_t persist_capacity = 1024*1024*1024;
   return std::make_shared<PMDKCache>(
       capacity, num_shard_bits, strict_capacity_limit, high_pri_pool_ratio,
+      persist_capacity,
       std::move(memory_allocator), use_adaptive_mutex, metadata_charge_policy);
 }
 

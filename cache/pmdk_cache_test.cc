@@ -15,7 +15,7 @@ namespace ROCKSDB_NAMESPACE {
 class PMDKCacheTest : public testing::Test {
  struct Value{
    Slice slice;
-   Value(const std::string& s): slice(s){}
+   Value(const std::string& s): slice(s.c_str(), s.size()+1){}
    Value(const Slice& value): slice(value){}
  };
 
@@ -43,14 +43,14 @@ class PMDKCacheTest : public testing::Test {
     return new Value(value);
   }
 
-  void NewCache(size_t capacity, double high_pri_pool_ratio = 0.0,
+  void NewCache(size_t capacity, size_t persist_capacity, double high_pri_pool_ratio = 0.0,
                 bool use_adaptive_mutex = kDefaultToAdaptiveMutex) {
     DeleteCache();
     cache_ = reinterpret_cast<PMDKCacheShard*>(
         port::cacheline_aligned_alloc(sizeof(PMDKCacheShard)));
     new (cache_) PMDKCacheShard(capacity, false /*strict_capcity_limit*/,
                                high_pri_pool_ratio, use_adaptive_mutex,
-                               kDontChargeCacheMetadata, (size_t)0);
+                               kDontChargeCacheMetadata, persist_capacity, (size_t)0);
   }
 
   void Insert(const std::string& key) {
@@ -72,9 +72,16 @@ class PMDKCacheTest : public testing::Test {
 
   void Erase(const std::string& key) { cache_->Erase(key, 0 /*hash*/); }
 
-  void ValidateLRUList(std::vector<std::string> keys,
-                       size_t num_high_pri_pool_keys = 0) {
-    
+  void ValidateLRUList(std::vector<std::string> keys) {
+    PersistentEntry* lru;
+    cache_->TEST_GetLRUList(&lru);
+    PersistentEntry* iter = lru;
+    for (const auto& key : keys){
+      iter = iter->next_lru.get();
+      ASSERT_NE(lru, iter);
+      ASSERT_EQ(key, std::string(iter->val.get()));
+    }
+    ASSERT_EQ(lru, iter->next_lru.get());
   }
 
  private:
@@ -82,17 +89,20 @@ class PMDKCacheTest : public testing::Test {
 };
 
 TEST_F(PMDKCacheTest, BasicLRU) {
-  NewCache(5);
+  size_t entry_charge = PMDKCache::GetBasePersistCharge() + 1 + 2;
+  NewCache(5, 5*entry_charge);
   // prepare payloads:
-  std::string payloads[] = {"a", "b", "c", "d", "e"};
+  std::string payloads1[] = {"a", "b", "c", "d", "e"};
   for (int i = 0; i < 5; i++){
-    Insert(payloads[i]);
+    Insert(payloads1[i]);
   }
   ValidateLRUList({"a", "b", "c", "d", "e"});
-  // for (char ch = 'x'; ch <= 'z'; ch++) {
-  //   Insert(ch);
-  // }
-  // ValidateLRUList({"d", "e", "x", "y", "z"});
+
+  std::string payloads2[] = {"x", "y", "z"};
+  for (int i = 0; i < 3; i++) {
+    Insert(payloads2[i]);
+  }
+  ValidateLRUList({"d", "e", "x", "y", "z"});
   // ASSERT_FALSE(Lookup("b"));
   // ValidateLRUList({"d", "e", "x", "y", "z"});
   // ASSERT_TRUE(Lookup("e"));

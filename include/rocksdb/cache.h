@@ -119,6 +119,8 @@ extern std::shared_ptr<Cache> NewLRUCache(
     CacheMetadataChargePolicy metadata_charge_policy =
         kDefaultCacheMetadataChargePolicy);
 
+extern std::shared_ptr<Cache> NewLRUCache(const LRUCacheOptions& cache_opts);
+
 extern std::shared_ptr<Cache> NewPMDKCache(
     size_t capacity, int num_shard_bits = -1,
     bool strict_capacity_limit = false, double high_pri_pool_ratio = 0.5,
@@ -126,8 +128,6 @@ extern std::shared_ptr<Cache> NewPMDKCache(
     bool use_adaptive_mutex = kDefaultToAdaptiveMutex,
     CacheMetadataChargePolicy metadata_charge_policy =
         kDefaultCacheMetadataChargePolicy);
-
-extern std::shared_ptr<Cache> NewLRUCache(const LRUCacheOptions& cache_opts);
 
 // Similar to NewLRUCache, but create a cache based on CLOCK algorithm with
 // better concurrent performance in some cases. See util/clock_cache.cc for

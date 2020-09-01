@@ -217,7 +217,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                 double high_pri_pool_ratio, bool use_adaptive_mutex,
                 CacheMetadataChargePolicy metadata_charge_policy,
-                size_t shard_id);
+                size_t persist_capacity, size_t shard_id);
   ~PMDKCacheShard() override = default;
 
   // Separate from constructor so caller can easily make an array of PMDKCache
@@ -262,7 +262,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
 
   std::string GetPrintableOptions() const override;
 
-  void TEST_GetLRUList(TransientHandle** lru, TransientHandle** lru_low_pri);
+  void TEST_GetLRUList(PersistentEntry** lru);
 
   //  Retrieves number of elements in LRU, for unit test purpose only
   //  not threadsafe
@@ -345,7 +345,7 @@ class PMDKCache
     : public ShardedCache {
  public:
   PMDKCache(size_t capacity, int num_shard_bits, bool strict_capacity_limit,
-           double high_pri_pool_ratio,
+           double high_pri_pool_ratio, size_t persist_capacity,
            std::shared_ptr<MemoryAllocator> memory_allocator = nullptr,
            bool use_adaptive_mutex = kDefaultToAdaptiveMutex,
            CacheMetadataChargePolicy metadata_charge_policy =
@@ -358,6 +358,8 @@ class PMDKCache
   size_t GetCharge(Handle* handle) const override;
   uint32_t GetHash(Handle* handle) const override;
   void DisownData() override;
+
+  static size_t GetBasePersistCharge();
 
   //  Retrieves number of elements in LRU, for unit test purpose only
   size_t TEST_GetLRUSize();
