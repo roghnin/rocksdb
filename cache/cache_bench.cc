@@ -57,6 +57,7 @@ DEFINE_uint32(erase_percent, 1,
               "Ratio of erase to total workload (expressed as a percentage)");
 
 DEFINE_bool(use_clock_cache, false, "");
+DEFINE_bool(use_pmdk_cache, false, "");
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -189,6 +190,11 @@ class CacheBench {
         fprintf(stderr, "Clock cache not supported.\n");
         exit(1);
       }
+    } else if (FLAGS_use_pmdk_cache) {
+      cache_ = NewPMDKCache(FLAGS_cache_size + 1024, FLAGS_num_shard_bits);
+      // TODO: get rid of those hard-coded numbers.
+      max_key_ = static_cast<uint64_t>(FLAGS_cache_size / FLAGS_resident_ratio /
+                                       (FLAGS_value_bytes + 8 + 152));
     } else {
       cache_ = NewLRUCache(FLAGS_cache_size, FLAGS_num_shard_bits);
     }
@@ -247,7 +253,7 @@ class CacheBench {
 
  private:
   std::shared_ptr<Cache> cache_;
-  const uint64_t max_key_;
+  uint64_t max_key_;
   // Cumulative thresholds in the space of a random uint64_t
   const uint64_t lookup_insert_threshold_;
   const uint64_t insert_threshold_;

@@ -32,7 +32,6 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                              CacheMetadataChargePolicy metadata_charge_policy,
                              size_t persist_capacity, size_t shard_id)
     : capacity_(capacity),
-      // TODO: set persistent_capacity dynamically.
       persistent_capacity_(persist_capacity),
       strict_capacity_limit_(strict_capacity_limit),
       usage_(0),
@@ -172,7 +171,7 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
     ret->key_data = e->key.get();
     ret->key_length = e->key_size;
     ret->value = pack(Slice(e->val.get(), e->val_size));
-    ret->p_entry = e;
+    ret->p_entry = e.get();
     ret->deleter = deleter;
     e->trans_handle = ret; // no need to be in transaction. It's transient.
   }
@@ -530,7 +529,9 @@ size_t PMDKCache::TEST_GetLRUSize() {
 }
 
 std::shared_ptr<Cache> NewPMDKCache(const LRUCacheOptions& cache_opts) {
-  return NewPMDKCache(cache_opts.capacity, cache_opts.num_shard_bits,
+  // TODO: make this dynamic:
+  size_t persist_capacity = 1024*1024*1024;
+  return NewPMDKCache(cache_opts.capacity, persist_capacity, cache_opts.num_shard_bits,
                      cache_opts.strict_capacity_limit,
                      cache_opts.high_pri_pool_ratio,
                      cache_opts.memory_allocator, cache_opts.use_adaptive_mutex,
@@ -538,7 +539,7 @@ std::shared_ptr<Cache> NewPMDKCache(const LRUCacheOptions& cache_opts) {
 }
 
 std::shared_ptr<Cache> NewPMDKCache(
-    size_t capacity, int num_shard_bits, bool strict_capacity_limit,
+    size_t capacity, size_t persist_capacity, int num_shard_bits, bool strict_capacity_limit,
     double high_pri_pool_ratio,
     std::shared_ptr<MemoryAllocator> memory_allocator, bool use_adaptive_mutex,
     CacheMetadataChargePolicy metadata_charge_policy) {
@@ -552,8 +553,7 @@ std::shared_ptr<Cache> NewPMDKCache(
   if (num_shard_bits < 0) {
     num_shard_bits = GetDefaultCacheShardBits(capacity);
   }
-  // TODO: make this dynamic:
-  size_t persist_capacity = 1024*1024*1024;
+  
   return std::make_shared<PMDKCache>(
       capacity, num_shard_bits, strict_capacity_limit, high_pri_pool_ratio,
       persist_capacity,

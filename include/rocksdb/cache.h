@@ -122,7 +122,7 @@ extern std::shared_ptr<Cache> NewLRUCache(
 extern std::shared_ptr<Cache> NewLRUCache(const LRUCacheOptions& cache_opts);
 
 extern std::shared_ptr<Cache> NewPMDKCache(
-    size_t capacity, int num_shard_bits = -1,
+    size_t capacity, size_t persist_capacity, int num_shard_bits = -1,
     bool strict_capacity_limit = false, double high_pri_pool_ratio = 0.5,
     std::shared_ptr<MemoryAllocator> memory_allocator = nullptr,
     bool use_adaptive_mutex = kDefaultToAdaptiveMutex,
