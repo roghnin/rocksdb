@@ -74,7 +74,7 @@ class PMDKCacheTest : public testing::Test {
 
   void ValidateLRUList(std::vector<std::string> keys,
                        size_t num_high_pri_pool_keys = 0) {
-    // TODO
+    
   }
 
  private:
@@ -85,14 +85,10 @@ TEST_F(PMDKCacheTest, BasicLRU) {
   NewCache(5);
   // prepare payloads:
   std::string payloads[] = {"a", "b", "c", "d", "e"};
-
   for (int i = 0; i < 5; i++){
     Insert(payloads[i]);
   }
-  // for (char ch = 'a'; ch <= 'e'; ch++) {
-  //   Insert(ch);
-  // }
-  // ValidateLRUList({"a", "b", "c", "d", "e"});
+  ValidateLRUList({"a", "b", "c", "d", "e"});
   // for (char ch = 'x'; ch <= 'z'; ch++) {
   //   Insert(ch);
   // }

@@ -46,7 +46,6 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
   // TODO: use an alternative to access() that works on all platforms.
   std::string heap_file = PHEAP_PATH + std::to_string(shard_id);
   if (access(heap_file.c_str(), F_OK) != 0){
-    // TODO: name pool with shard id.
     pop_ = po::pool<PersistentRoot>::create(heap_file, "pmdk_cache_pool", PMEMOBJ_POOL_SIZE, S_IRWXU);
     po::transaction::run(pop_, [&] {
       auto root = pop_.root();
@@ -129,7 +128,7 @@ void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() == nullptr);
   assert(e->prev_lru.get() == nullptr);
   po::transaction::run(pop_, [&, e] {
-    Inset "e" to head of LRU list.
+    // Inset "e" to head of LRU list.
     e->next_lru = lru_;
     e->prev_lru = lru_->prev_lru;
     e->prev_lru->next_lru = e;
@@ -335,14 +334,10 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   if (unpack != nullptr){
     assert(deleter != nullptr && pack != nullptr);
     const Slice& unpacked_val = unpack(value);
-    // TODO: better estimation of persistent total charge:
     size_t persistent_charge = sizeof(PersistentEntry) + 
                                 key.size() + 
                                 unpacked_val.size() + 
-                                // rough estimation of hash map entry: cache line size,
-                                // since each hash map node requires its mutex padded
-                                // to cache line.
-                                _SC_LEVEL2_CACHE_LINESIZE;
+                                sizeof(po::persistent_ptr<PersistentEntry>);
 
     po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack, key] {
       {
