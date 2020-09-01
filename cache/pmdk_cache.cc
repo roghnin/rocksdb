@@ -115,11 +115,11 @@ size_t PMDKCacheShard::TEST_GetLRUSize() {
 void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() != nullptr);
   assert(e->prev_lru.get() != nullptr);
-  // po::transaction::run(pop_, [&, e] {
+  po::transaction::run(pop_, [&, e] {
     e->next_lru->prev_lru = e->prev_lru;
     e->prev_lru->next_lru = e->next_lru;
     e->prev_lru = e->next_lru = nullptr;
-  // });
+  });
   size_t persist_charge = e->persist_charge;
   assert(lru_usage_ >= persist_charge);
   lru_usage_ -= persist_charge;
@@ -128,13 +128,13 @@ void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
 void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() == nullptr);
   assert(e->prev_lru.get() == nullptr);
-  // po::transaction::run(pop_, [&, e] {
-    // Inset "e" to head of LRU list.
+  po::transaction::run(pop_, [&, e] {
+    Inset "e" to head of LRU list.
     e->next_lru = lru_;
     e->prev_lru = lru_->prev_lru;
     e->prev_lru->next_lru = e;
     e->next_lru->prev_lru = e;
-  // });
+  });
   lru_usage_ += e->persist_charge;
 }
 
