@@ -48,18 +48,21 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
   if (access(heap_file.c_str(), F_OK) != 0){
     // TODO: name pool with shard id.
     pop_ = po::pool<PersistentRoot>::create(heap_file, "pmdk_cache_pool", PMEMOBJ_POOL_SIZE, S_IRWXU);
-    PersistentRoot* root = pop_.root().get();
-    po::transaction::run(pop_, [&, root] {
+    po::transaction::run(pop_, [&] {
+      auto root = pop_.root();
       root->persistent_hashtable = po::make_persistent<PersistTierHashTable>(&pop_);
       root->persistent_lru_list = po::make_persistent<PersistentEntry>();
       root->era = 0;
-      persistent_hashtable_ = root->persistent_hashtable.get();
+      persistent_hashtable_ = root->persistent_hashtable;
       lru_ = root->persistent_lru_list;
+      // empty circular linked lru list
+      lru_->next_lru = lru_;
+      lru_->prev_lru = lru_;
     });
     era_ = 0;
   } else {
     pop_ = po::pool<PersistentRoot>::open(heap_file, "pmdk_cache_pool");
-    persistent_hashtable_ = pop_.root()->persistent_hashtable.get();
+    persistent_hashtable_ = pop_.root()->persistent_hashtable;
     persistent_hashtable_->SetPop(&pop_);
     lru_ = pop_.root()->persistent_lru_list;
     era_ = ++pop_.root()->era;
@@ -112,11 +115,11 @@ size_t PMDKCacheShard::TEST_GetLRUSize() {
 void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() != nullptr);
   assert(e->prev_lru.get() != nullptr);
-  po::transaction::run(pop_, [&, e] {
+  // po::transaction::run(pop_, [&, e] {
     e->next_lru->prev_lru = e->prev_lru;
     e->prev_lru->next_lru = e->next_lru;
     e->prev_lru = e->next_lru = nullptr;
-  });
+  // });
   size_t persist_charge = e->persist_charge;
   assert(lru_usage_ >= persist_charge);
   lru_usage_ -= persist_charge;
@@ -125,13 +128,13 @@ void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
 void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() == nullptr);
   assert(e->prev_lru.get() == nullptr);
-  po::transaction::run(pop_, [&, e] {
+  // po::transaction::run(pop_, [&, e] {
     // Inset "e" to head of LRU list.
     e->next_lru = lru_;
     e->prev_lru = lru_->prev_lru;
     e->prev_lru->next_lru = e;
     e->next_lru->prev_lru = e;
-  });
+  // });
   lru_usage_ += e->persist_charge;
 }
 
@@ -366,29 +369,29 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
           pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
           // insert persistent entry into hash table.
-          po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(hash, p_entry);
-          // usage_ += persistent_charge;
-          // if (old.get() != nullptr){
-          //   *s_p = Status::OkOverwritten();
-          //   assert(old->InCache());
-          //   old->SetInCache(false);
-          //   if (!old->HasRefs()){
-          //     LRU_Remove(old);
-          //     size_t old_persist_charge = old->persist_charge;
-          //     assert(usage_ >= old_persist_charge);
-          //     usage_ -= old_persist_charge;
-          //     last_reference_list.push_back(old);
-          //   }
-          // }
-          // if (handle == nullptr){
-          //   LRU_Insert(p_entry);
-          // } else {
-          //   // TODO: don't do this when insertion into transient tier
-          //   // is successful. Always insert into LRU instead.
-          //   TransientHandle* e = GetTransientHandle(p_entry, pack, deleter);
-          //   e->Ref();
-          //   *handle = reinterpret_cast<Cache::Handle*>(e);
-          // }
+          po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(p_entry);
+          usage_ += persistent_charge;
+          if (old.get() != nullptr){
+            *s_p = Status::OkOverwritten();
+            assert(old->InCache());
+            old->SetInCache(false);
+            if (!old->HasRefs()){
+              LRU_Remove(old);
+              size_t old_persist_charge = old->persist_charge;
+              assert(usage_ >= old_persist_charge);
+              usage_ -= old_persist_charge;
+              last_reference_list.push_back(old);
+            }
+          }
+          if (handle == nullptr){
+            LRU_Insert(p_entry);
+          } else {
+            // TODO: don't do this when insertion into transient tier
+            // is successful. Always insert into LRU instead.
+            TransientHandle* e = GetTransientHandle(p_entry, pack, deleter);
+            e->Ref();
+            *handle = reinterpret_cast<Cache::Handle*>(e);
+          }
         }
       }
       // Free the entries here outside of mutex for performance reasons

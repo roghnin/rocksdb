@@ -125,9 +125,9 @@ class PersistTierHashTable{
     }
     return (memcmp(data, entry->key.get(), size) == 0);
   }
-  po::persistent_ptr<PersistentEntry>* FindPointer(const Slice& key, uint32_t hash){
+  po::persistent_ptr<PersistentEntry>* FindPointer(const char* key_data, size_t size, uint32_t hash){
     po::persistent_ptr<PersistentEntry>* ptr = &list_[hash & (length_-1)];
-    while((*ptr) != nullptr && ((*ptr)->hash != hash || !KeyEqual(key.data(), key.size(), (*ptr)))) {
+    while((*ptr) != nullptr && ((*ptr)->hash != hash || !KeyEqual(key_data, size, (*ptr)))) {
       ptr = &(*ptr)->next_hash;
     }
     return ptr;
@@ -170,9 +170,8 @@ public:
     pop_ = pop;
   }
 
-  po::persistent_ptr<PersistentEntry> Insert(
-      uint32_t hash, const Slice& key, po::persistent_ptr<PersistentEntry> entry){
-    po::persistent_ptr<PersistentEntry>* ptr = FindPointer(key, hash);
+  po::persistent_ptr<PersistentEntry> Insert(po::persistent_ptr<PersistentEntry> entry){
+    po::persistent_ptr<PersistentEntry>* ptr = FindPointer(entry->key.get(), entry->key_size, entry->hash);
     po::persistent_ptr<PersistentEntry> old = *ptr;
     entry->next_hash = (old == nullptr ? nullptr : old->next_hash);
     *ptr = entry;
@@ -186,12 +185,12 @@ public:
   }
 
   po::persistent_ptr<PersistentEntry> Lookup(const Slice& key, uint32_t hash){
-    return (*FindPointer(key, hash));
+    return (*FindPointer(key.data(), key.size(), hash));
   }
   
   // this may only be used by Erase().
   po::persistent_ptr<PersistentEntry> Remove(const Slice& key, uint32_t hash){
-    po::persistent_ptr<PersistentEntry>* ptr = FindPointer(key, hash);
+    po::persistent_ptr<PersistentEntry>* ptr = FindPointer(key.data(), key.size(), hash);
     po::persistent_ptr<PersistentEntry> result = *ptr;
     if (result != nullptr){
       *ptr = result->next_hash;
