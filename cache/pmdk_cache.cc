@@ -339,10 +339,6 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   po::transaction::run(pop_, [&, s_p, deleter, key] {
     
     autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
-<<<<<<< HEAD
-=======
-    TransientHandle* transient_handle = nullptr;
->>>>>>> f18bebfc6db864a76fd5f0b115397b308c964722
     Status transient_s;
     Status persist_s;
     po::persistent_ptr<PersistentEntry> pe = nullptr;
