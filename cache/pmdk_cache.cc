@@ -330,48 +330,51 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
 
   Status s;
   Status* s_p = &s;
-  autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
 
-  // insert into persistent tier first, since failed insertion into transient tier
-  // may end up deleting value.
-
-  if (unpack != nullptr){
-    assert(deleter != nullptr && pack != nullptr);
-    const Slice& unpacked_val = unpack(value);
-    size_t persistent_charge =  PMDKCache::GetBasePersistCharge()
-                                + key.size() + unpacked_val.size();
-
-    po::transaction::run(pop_, [&, unpacked_val, persistent_charge, s_p, deleter, pack, key] {
-      {
-        MutexLock l(&mutex_);
+  po::transaction::run(pop_, [&, s_p, deleter, key] {
+    
+    autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
+    TransientHandle* transient_handle;
+    Status transient_s;
+    Status persist_s;
+    po::persistent_ptr<PersistentEntry> pe;
+    {
+      MutexLock l(&mutex_);
+      // insert into persistent tier first, since failed insertion into transient tier
+      // may end up deleting value.
+      if (unpack != nullptr){
+        assert(deleter != nullptr && pack != nullptr);
+        const Slice& unpacked_val = unpack(value);
+        size_t persistent_charge =  PMDKCache::GetBasePersistCharge()
+                                    + key.size() + unpacked_val.size();
         EvictFromLRU(persistent_charge, &last_reference_list);
         // TODO: calculate charge and refuse insert if cache is full
         if ((usage_ + persistent_charge) > persistent_capacity_){
           if (handle != nullptr) {
             *handle = nullptr;
-            *s_p = Status::Incomplete("Insert failed due to LRU cache being full.");
+            persist_s = Status::Incomplete("Insert failed due to LRU cache being full.");
             assert(false);
           }
           // else, do nothing here and pretend the insertion succeeded but entry got
           // kicked out immediately.
         } else {
           // create new persistent entry
-          auto p_entry = po::make_persistent<PersistentEntry>();
-          p_entry->persist_charge = persistent_charge;
-          p_entry->key_size = key.size();
-          p_entry->key = po::make_persistent<char[]>(key.size());
-          p_entry->val_size = unpacked_val.size();
-          p_entry->val = po::make_persistent<char[]>(unpacked_val.size());
-          p_entry->hash = hash;
-          p_entry->SetInCache(true);
+          pe = po::make_persistent<PersistentEntry>();
+          pe->persist_charge = persistent_charge;
+          pe->key_size = key.size();
+          pe->key = po::make_persistent<char[]>(key.size());
+          pe->val_size = unpacked_val.size();
+          pe->val = po::make_persistent<char[]>(unpacked_val.size());
+          pe->hash = hash;
+          pe->SetInCache(true);
           // memcpy from transient to persistent tier
-          pop_.memcpy_persist(p_entry->key.get(), key.data(), key.size());
-          pop_.memcpy_persist(p_entry->val.get(), unpacked_val.data(), unpacked_val.size());
+          pop_.memcpy_persist(pe->key.get(), key.data(), key.size());
+          pop_.memcpy_persist(pe->val.get(), unpacked_val.data(), unpacked_val.size());
           // insert persistent entry into hash table.
-          po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(p_entry);
+          po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(pe);
           usage_ += persistent_charge;
           if (old.get() != nullptr){
-            *s_p = Status::OkOverwritten();
+            persist_s = Status::OkOverwritten();
             assert(old->InCache());
             old->SetInCache(false);
             if (!old->HasRefs()){
@@ -383,32 +386,36 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
             }
           }
           if (handle == nullptr){
-            LRU_Insert(p_entry);
-          } else {
-            // TODO: don't do this when insertion into transient tier
-            // is successful. Always insert into LRU instead.
-            TransientHandle* e = GetTransientHandle(p_entry, pack, deleter);
-            e->Ref();
-            *handle = reinterpret_cast<Cache::Handle*>(e);
+            LRU_Insert(pe);
           }
+        } 
+      } // if (unpack != nullptr)
+
+      // TODO: insert into transient tier, and delete the following line.
+      transient_s = Status::Incomplete("not inserted into transient tier");
+    } // lock
+
+    if (transient_s == Status::OK() || transient_s == Status::OkOverwritten()){
+      *s_p = transient_s;
+    } else {
+      if (persist_s == Status::OK() || persist_s == Status::OkOverwritten()) {
+        // delete value if insert only succeeded in persistent tier.
+        if (deleter){
+          (*deleter)(key, value);
+        }
+        if (handle != nullptr) {
+          TransientHandle* e = GetTransientHandle(pe, pack, deleter);
+          e->Ref();
+          *handle = reinterpret_cast<Cache::Handle*>(e);
         }
       }
-      // Free the entries here outside of mutex for performance reasons
-      for (auto entry : last_reference_list) {
-        FreePEntry(entry);
-      }
-    });
-    // TODO: insert into transient tier.
-
-    if (s != Status::OK()){
-      if (deleter){
-        (*deleter)(key, value);
-      }
-      return s;
+      *s_p = persist_s;
     }
-  }
-
-  
+    // Free the entries here outside of mutex for performance reasons
+    for (auto entry : last_reference_list) {
+      FreePEntry(entry);
+    }
+  }); // transaction
   return s;
 }
 
