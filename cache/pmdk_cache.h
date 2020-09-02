@@ -83,6 +83,9 @@ struct PersistentEntry{
   po::persistent_ptr<PersistentEntry> prev_lru = nullptr;
   // persistent flags:
   po::p<bool> in_cache;
+  po::p<int> in_cache_cnt = 0; // for debugging.
+  po::p<int> insert_cnt = 0; // for debugging.
+  po::p<int> remove_cnt = 0; // for debugging.
 
   // TODO: set era to be current era.
   size_t era = 0;
@@ -105,6 +108,7 @@ struct PersistentEntry{
   }
   void SetInCache(bool x){
     in_cache = x;
+    in_cache_cnt++;
   }
 };
 
@@ -123,7 +127,14 @@ class PersistTierHashTable{
     if (size != entry->key_size){
       return false;
     }
-    return (memcmp(data, entry->key.get(), size) == 0);
+    char* entry_key = entry->key.get();
+    for (size_t i = 0; i < size; i++){
+      if (entry_key[i] != data[i]){
+        return false;
+      }
+    }
+    return true;
+    // return (memcmp(data, entry->key.get(), size) == 0);
   }
   po::persistent_ptr<PersistentEntry>* FindPointer(const char* key_data, size_t size, uint32_t hash){
     po::persistent_ptr<PersistentEntry>* ptr = &list_[hash & (length_-1)];
@@ -180,7 +191,10 @@ public:
       if (elems_ > length_){
         Resize();
       }
+    } else {
+      old->remove_cnt++;
     }
+    entry->insert_cnt++;
     return old;
   }
 
@@ -195,6 +209,7 @@ public:
     if (result != nullptr){
       *ptr = result->next_hash;
       --elems_;
+      result->remove_cnt++;
     }
     return result;
   }

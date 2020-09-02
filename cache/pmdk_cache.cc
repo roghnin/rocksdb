@@ -111,11 +111,11 @@ size_t PMDKCacheShard::TEST_GetLRUSize() {
 void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() != nullptr);
   assert(e->prev_lru.get() != nullptr);
-  po::transaction::run(pop_, [&, e] {
+  // po::transaction::run(pop_, [&, e] {
     e->next_lru->prev_lru = e->prev_lru;
     e->prev_lru->next_lru = e->next_lru;
     e->prev_lru = e->next_lru = nullptr;
-  });
+  // });
   size_t persist_charge = e->persist_charge;
   assert(lru_usage_ >= persist_charge);
   lru_usage_ -= persist_charge;
@@ -124,13 +124,13 @@ void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
 void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() == nullptr);
   assert(e->prev_lru.get() == nullptr);
-  po::transaction::run(pop_, [&, e] {
+  // po::transaction::run(pop_, [&, e] {
     // Inset "e" to head of LRU list.
     e->next_lru = lru_;
     e->prev_lru = lru_->prev_lru;
     e->prev_lru->next_lru = e;
     e->next_lru->prev_lru = e;
-  });
+  // });
   lru_usage_ += e->persist_charge;
 }
 
@@ -171,6 +171,7 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(po::persistent_ptr<Persisten
     ret = new TransientHandle();
     ret->key_data = e->key.get();
     ret->key_length = e->key_size;
+    ret->hash = e->hash;
     ret->value = pack(Slice(e->val.get(), e->val_size));
     ret->p_entry = e.get();
     ret->deleter = deleter;
@@ -288,6 +289,8 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
         if (*last_reference_p && e->p_entry->InCache()) {
           po::persistent_ptr<PersistentEntry> pe =
             persistent_hashtable_->Lookup(e->key(), e->hash);
+          // po::persistent_ptr<PersistentEntry> pe = 
+          //   e->p_entry;
           assert(pe != nullptr);
           // The item is still in cache, and nobody else holds a reference to it
           if (usage_ > persistent_capacity_ || force_erase){
