@@ -19,6 +19,7 @@
 #include "util/mutexlock.h"
 
 // TODO: make these run-time variables
+// #define PHEAP_PATH "/mnt/pmem/pmdk_cache/"
 #define PHEAP_PATH "/dev/shm/pmdk_cache/"
 #define PMEMOBJ_POOL_SIZE (size_t)(1024*1024*1024)
 
@@ -338,9 +339,13 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   po::transaction::run(pop_, [&, s_p, deleter, key] {
     
     autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
+<<<<<<< HEAD
+=======
+    TransientHandle* transient_handle = nullptr;
+>>>>>>> f18bebfc6db864a76fd5f0b115397b308c964722
     Status transient_s;
     Status persist_s;
-    po::persistent_ptr<PersistentEntry> pe;
+    po::persistent_ptr<PersistentEntry> pe = nullptr;
     {
       MutexLock l(&mutex_);
       // insert into persistent tier first, since failed insertion into transient tier
@@ -390,28 +395,31 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           if (handle == nullptr){
             LRU_Insert(pe);
           }
-        } 
+        }
       } // if (unpack != nullptr)
 
       // TODO: insert into transient tier, and delete the following line.
       transient_s = Status::Incomplete("not inserted into transient tier");
+
+      if (transient_s == Status::OK() || transient_s == Status::OkOverwritten()){
+        *s_p = transient_s;
+      } else {
+        if ((persist_s == Status::OK() || persist_s == Status::OkOverwritten()) &&
+            handle != nullptr){
+            TransientHandle* e = GetTransientHandle(pe, pack, deleter);
+            e->Ref();
+            *handle = reinterpret_cast<Cache::Handle*>(e);
+          }
+        *s_p = persist_s;
+      }
     } // lock
 
-    if (transient_s == Status::OK() || transient_s == Status::OkOverwritten()){
-      *s_p = transient_s;
-    } else {
-      if (persist_s == Status::OK() || persist_s == Status::OkOverwritten()) {
-        // delete value if insert only succeeded in persistent tier.
-        if (deleter){
-          (*deleter)(key, value);
-        }
-        if (handle != nullptr) {
-          TransientHandle* e = GetTransientHandle(pe, pack, deleter);
-          e->Ref();
-          *handle = reinterpret_cast<Cache::Handle*>(e);
-        }
+    if ((persist_s == Status::OK() || persist_s == Status::OkOverwritten()) &&
+        !(transient_s == Status::OK() || transient_s == Status::OkOverwritten())) {
+      // delete value if insert only succeeded in persistent tier.
+      if (deleter){
+        (*deleter)(key, value);
       }
-      *s_p = persist_s;
     }
     // Free the entries here outside of mutex for performance reasons
     for (auto entry : last_reference_list) {
