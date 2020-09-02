@@ -27,7 +27,7 @@
 namespace ROCKSDB_NAMESPACE {
 
 PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
-                             double high_pri_pool_ratio,
+                             double /*high_pri_pool_ratio*/,
                              bool use_adaptive_mutex,
                              CacheMetadataChargePolicy metadata_charge_policy,
                              size_t persist_capacity, size_t shard_id)
@@ -92,8 +92,8 @@ void PMDKCacheShard::EraseUnRefEntries() {
   });
 }
 
-void PMDKCacheShard::ApplyToAllCacheEntries(void (*callback)(void*, size_t),
-                                           bool thread_safe) {
+void PMDKCacheShard::ApplyToAllCacheEntries(void /*(*callback)*/(void*, size_t),
+                                           bool /*thread_safe*/) {
   // TODO
 }
 
@@ -205,7 +205,7 @@ bool PMDKCacheShard::IsLRUHandle(Cache::Handle* e){
   }
 }
 
-void PMDKCacheShard::SetCapacity(size_t capacity) {
+void PMDKCacheShard::SetCapacity(size_t /*capacity*/) {
   // TODO: call transient SetCapacity.
 }
 
@@ -225,7 +225,7 @@ void PMDKCacheShard::SetPersistentCapacity(size_t capacity) {
   });
 }
 
-void PMDKCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit){
+void PMDKCacheShard::SetStrictCapacityLimit(bool /*strict_capacity_limit*/){
   // TODO: call transient SetStrictCapacityLimit().
 }
 
@@ -287,11 +287,15 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
         MutexLock l(&mutex_);
         *last_reference_p = e->Unref();
         if (*last_reference_p && e->p_entry->InCache()) {
+          
           po::persistent_ptr<PersistentEntry> pe =
             persistent_hashtable_->Lookup(e->key(), e->hash);
-          // po::persistent_ptr<PersistentEntry> pe = 
-          //   e->p_entry;
-          assert(pe != nullptr);
+          // NOTE: the result pe is actually equivalent to e->p_entry.
+          // The reason of this detour is that PMDK "thinks" e->p_entry
+          // is from outside of persistent heap.
+          // We may consider filing an issue to PMDK people.
+          assert(pe == e->p_entry);
+
           // The item is still in cache, and nobody else holds a reference to it
           if (usage_ > persistent_capacity_ || force_erase){
             // The LRU list must be empty since the cache is full
@@ -322,9 +326,9 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
 }
 
 Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
-                             size_t charge,
+                             size_t /*charge*/,
                              void (*deleter)(const Slice& key, void* value),
-                             Cache::Handle** handle, Cache::Priority priority,
+                             Cache::Handle** handle, Cache::Priority /*priority*/,
                              const Slice (*unpack)(void* packed),
                              void* (*pack)(const Slice& value)) {
 
@@ -334,7 +338,6 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   po::transaction::run(pop_, [&, s_p, deleter, key] {
     
     autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
-    TransientHandle* transient_handle;
     Status transient_s;
     Status persist_s;
     po::persistent_ptr<PersistentEntry> pe;
@@ -353,7 +356,6 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           if (handle != nullptr) {
             *handle = nullptr;
             persist_s = Status::Incomplete("Insert failed due to LRU cache being full.");
-            assert(false);
           }
           // else, do nothing here and pretend the insertion succeeded but entry got
           // kicked out immediately.
@@ -461,6 +463,7 @@ size_t PMDKCacheShard::GetPinnedUsage() const {
 
 std::string PMDKCacheShard::GetPrintableOptions() const {
   // TODO
+  return std::string();
 }
 
 PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
@@ -514,6 +517,7 @@ size_t PMDKCache::GetBasePersistCharge(){
 size_t PMDKCache::GetCharge(Handle* handle) const {
   if (PMDKCacheShard::IsLRUHandle(handle)){
     // call LRUCache's GetCharge
+    return 0;
   } else {
     return reinterpret_cast<TransientHandle*>(handle)->p_entry->persist_charge;
   }

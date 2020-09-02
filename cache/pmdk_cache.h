@@ -127,14 +127,7 @@ class PersistTierHashTable{
     if (size != entry->key_size){
       return false;
     }
-    char* entry_key = entry->key.get();
-    for (size_t i = 0; i < size; i++){
-      if (entry_key[i] != data[i]){
-        return false;
-      }
-    }
-    return true;
-    // return (memcmp(data, entry->key.get(), size) == 0);
+    return (memcmp(data, entry->key.get(), size) == 0);
   }
   po::persistent_ptr<PersistentEntry>* FindPointer(const char* key_data, size_t size, uint32_t hash){
     po::persistent_ptr<PersistentEntry>* ptr = &list_[hash & (length_-1)];
@@ -317,7 +310,6 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   po::persistent_ptr<PersistentEntry> lru_;
 
   // This is a concurrent persistent container provided by PMDK.
-  // TODO: make this an instance rather than a pointer.
   po::persistent_ptr<PersistTierHashTable> persistent_hashtable_;
 
   // Current era number. Advanced every crash.
