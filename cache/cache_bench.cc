@@ -169,7 +169,9 @@ const Slice unpack(void* value){
 }
 
 void* pack(const Slice& value){
-  return const_cast<char*>(value.data());
+  char* ret = new char[FLAGS_value_bytes];
+  memcpy(ret, value.data(), FLAGS_value_bytes);
+  return ret;
 }
 
 class CacheBench {
