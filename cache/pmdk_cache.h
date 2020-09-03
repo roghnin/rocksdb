@@ -8,22 +8,23 @@
 // found in the LICENSE file. See the AUTHORS file for names of contributors.
 #pragma once
 
+#include <unistd.h>
+
 #include <string>
 
-#include "cache/sharded_cache.h"
+#include <libpmemobj++/make_persistent.hpp>
+#include <libpmemobj++/make_persistent_array.hpp>
+#include <libpmemobj++/p.hpp>
+#include <libpmemobj++/pext.hpp> // provides operators for p<> types.
+#include <libpmemobj++/pool.hpp>
+#include <libpmemobj++/persistent_ptr.hpp>
+#include <libpmemobj++/transaction.hpp>
+#include <libpmemobj++/utils.hpp>
 
+#include "cache/sharded_cache.h"
 #include "port/malloc.h"
 #include "port/port.h"
 #include "util/autovector.h"
-
-// TODO: re-order included headers.
-#include <unistd.h>
-#include <libpmemobj++/p.hpp>
-#include <libpmemobj++/container/concurrent_hash_map.hpp>
-#include <libpmemobj++/pool.hpp>
-#include <libpmemobj++/persistent_ptr.hpp>
-#include <libpmemobj++/make_persistent_array.hpp>
-#include <libpmemobj++/transaction.hpp>
 
 namespace po = pmem::obj;
 
@@ -83,11 +84,7 @@ struct PersistentEntry{
   po::persistent_ptr<PersistentEntry> prev_lru = nullptr;
   // persistent flags:
   po::p<bool> in_cache;
-  po::p<int> in_cache_cnt = 0; // for debugging.
-  po::p<int> insert_cnt = 0; // for debugging.
-  po::p<int> remove_cnt = 0; // for debugging.
 
-  // TODO: set era to be current era.
   size_t era = 0;
   // transient fields, validated with era number:
   TransientHandle* trans_handle = nullptr;
@@ -108,7 +105,6 @@ struct PersistentEntry{
   }
   void SetInCache(bool x){
     in_cache = x;
-    in_cache_cnt++;
   }
 };
 
@@ -184,10 +180,7 @@ public:
       if (elems_ > length_){
         Resize();
       }
-    } else {
-      old->remove_cnt++;
     }
-    entry->insert_cnt++;
     return old;
   }
 
@@ -202,7 +195,6 @@ public:
     if (result != nullptr){
       *ptr = result->next_hash;
       --elems_;
-      result->remove_cnt++;
     }
     return result;
   }

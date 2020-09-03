@@ -9,12 +9,10 @@
 
 #include "cache/pmdk_cache.h"
 
-#include <experimental/filesystem>
-#include <assert.h>
-#include <stdio.h>
-#include <stdlib.h>
+#include <cassert>
+#include <cstdio>
+#include <cstdlib>
 #include <string>
-
 
 #include "util/mutexlock.h"
 
@@ -22,8 +20,6 @@
 // #define PHEAP_PATH "/mnt/pmem/pmdk_cache/"
 #define PHEAP_PATH "/dev/shm/pmdk_cache/"
 #define PMEMOBJ_POOL_SIZE (size_t)(1024*1024*1024)
-
-
 
 namespace ROCKSDB_NAMESPACE {
 
