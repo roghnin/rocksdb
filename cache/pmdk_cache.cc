@@ -37,8 +37,11 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
   // TODO: set up an LRUCacheShard as transient tier.
 
   // Set up persistent memory pool (pop)
-  // TODO: use an alternative to access() that works on all platforms.
   std::string heap_file = PHEAP_PATH + std::to_string(shard_id);
+  // TODO: use an alternative to access() that works on all platforms.
+  // TODO: provide option to ignore existing pool and create new one.
+  // TDOO: persist static metadata (capacity, etc) and report inconsistency with
+  // arguments during recovery.
   if (access(heap_file.c_str(), F_OK) != 0){
     pop_ = po::pool<PersistentRoot>::create(heap_file, "pmdk_cache_pool", PMEMOBJ_POOL_SIZE, S_IRWXU);
     po::transaction::run(pop_, [&] {
@@ -66,8 +69,6 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     lru_ = pop_.root()->persistent_lru_list;
     era_ = ++pop_.root()->era;
   }
-  // TDOO: persist static metadata (capacity, etc) and report inconsistency with
-  // arguments during recovery.
 }
 
 PMDKCacheShard::~PMDKCacheShard(){
