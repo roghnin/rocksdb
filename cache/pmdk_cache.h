@@ -220,7 +220,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
                 double high_pri_pool_ratio, bool use_adaptive_mutex,
                 CacheMetadataChargePolicy metadata_charge_policy,
                 size_t persist_capacity, size_t shard_id);
-  ~PMDKCacheShard() override = default;
+  ~PMDKCacheShard();
 
   // Separate from constructor so caller can easily make an array of PMDKCache
   // if current usage is more than new capacity, the function will attempt to
@@ -324,8 +324,6 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
 
   // PMDK's persistent memory pool;
   po::pool<PersistentRoot> pop_;
-
-  // TODO: recover memory usage and lru usage data after crash, or consider persisting them.
 
   // Memory size for entries residing in the cache
   po::persistent_ptr<size_t> usage_ = nullptr;

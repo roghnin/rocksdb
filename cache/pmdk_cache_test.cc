@@ -117,6 +117,15 @@ TEST_F(PMDKCacheTest, BasicLRU) {
   ValidateLRUList({"y", "e", "z", "d", "u"});
   Insert("v");
   ValidateLRUList({"e", "z", "d", "u", "v"});
+
+  // try recovery
+  NewCache(5, 5*entry_charge);
+  ValidateLRUList({"e", "z", "d", "u", "v"});
+  ASSERT_TRUE(Lookup("e"));
+  ASSERT_TRUE(Lookup("z"));
+  ASSERT_TRUE(Lookup("d"));
+  ASSERT_TRUE(Lookup("u"));
+  ASSERT_TRUE(Lookup("v"));
 }
 
 }  // namespace ROCKSDB_NAMESPACE

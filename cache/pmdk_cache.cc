@@ -66,6 +66,12 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     lru_ = pop_.root()->persistent_lru_list;
     era_ = ++pop_.root()->era;
   }
+  // TDOO: persist static metadata (capacity, etc) and report inconsistency with
+  // arguments during recovery.
+}
+
+PMDKCacheShard::~PMDKCacheShard(){
+  pop_.close();
 }
 
 void PMDKCacheShard::EraseUnRefEntries() {
