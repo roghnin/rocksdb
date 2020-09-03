@@ -275,7 +275,8 @@ class ClockCacheShard final : public CacheShard {
                 void* /*(*pack)*/ (const Slice& value)) override;
   Cache::Handle* Lookup(const Slice& key, uint32_t hash,
                         void* /*(*pack)*/ (const Slice& value),
-                        void /*(*deleter)*/ (const Slice&, void* value)) override;
+                        void /*(*deleter)*/ (const Slice&,
+                                             void* value)) override;
   // If the entry in in cache, increase reference count and return true.
   // Return false otherwise.
   //
@@ -649,7 +650,8 @@ Status ClockCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
 
 Cache::Handle* ClockCacheShard::Lookup(const Slice& key, uint32_t hash,
                                        void* /*(*pack)*/ (const Slice& value),
-                                       void /*(*deleter)*/ (const Slice&, void* value)) {
+                                       void /*(*deleter)*/ (const Slice&,
+                                                            void* value)) {
   HashTable::const_accessor accessor;
   if (!table_.find(accessor, CacheKey(key, hash))) {
     return nullptr;

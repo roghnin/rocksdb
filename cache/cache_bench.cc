@@ -164,11 +164,11 @@ void deleter(const Slice& /*key*/, void* value) {
 }
 }  // namespace
 
-const Slice unpack(void* value){
+const Slice unpack(void* value) {
   return Slice((char*)value, FLAGS_value_bytes);
 }
 
-void* pack(const Slice& value){
+void* pack(const Slice& value) {
   char* ret = new char[FLAGS_value_bytes];
   memcpy(ret, value.data(), FLAGS_value_bytes);
   return ret;
@@ -319,7 +319,8 @@ class CacheBench {
         } else {
           // do insert
           cache_->Insert(key, createValue(thread->rnd), FLAGS_value_bytes,
-                         &deleter, &handle, Cache::Priority::LOW, &unpack, &pack);
+                         &deleter, &handle, Cache::Priority::LOW, &unpack,
+                         &pack);
         }
       } else if (random_op < insert_threshold_) {
         if (handle) {

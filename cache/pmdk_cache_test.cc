@@ -13,11 +13,11 @@
 namespace ROCKSDB_NAMESPACE {
 
 class PMDKCacheTest : public testing::Test {
- struct Value{
-   Slice slice;
-   Value(const std::string& s): slice(s.c_str(), s.size()+1){}
-   Value(const Slice& value): slice(value){}
- };
+  struct Value {
+    Slice slice;
+    Value(const std::string& s) : slice(s.c_str(), s.size() + 1) {}
+    Value(const Slice& value) : slice(value) {}
+  };
 
  public:
   PMDKCacheTest() {}
@@ -31,32 +31,32 @@ class PMDKCacheTest : public testing::Test {
     }
   }
 
-  static void ValueDeleter(const Slice& /*key*/ ,void* value){
+  static void ValueDeleter(const Slice& /*key*/, void* value) {
     delete reinterpret_cast<Value*>(value);
   }
 
-  static const Slice ValueUnpack(void* packed){
+  static const Slice ValueUnpack(void* packed) {
     return reinterpret_cast<Value*>(packed)->slice;
   }
 
-  static void* ValuePack(const Slice& value){
-    return new Value(value);
-  }
+  static void* ValuePack(const Slice& value) { return new Value(value); }
 
-  void NewCache(size_t capacity, size_t persist_capacity, double high_pri_pool_ratio = 0.0,
+  void NewCache(size_t capacity, size_t persist_capacity,
+                double high_pri_pool_ratio = 0.0,
                 bool use_adaptive_mutex = kDefaultToAdaptiveMutex) {
     DeleteCache();
     cache_ = reinterpret_cast<PMDKCacheShard*>(
         port::cacheline_aligned_alloc(sizeof(PMDKCacheShard)));
-    new (cache_) PMDKCacheShard(capacity, false /*strict_capcity_limit*/,
-                               high_pri_pool_ratio, use_adaptive_mutex,
-                               kDontChargeCacheMetadata, persist_capacity, (size_t)0);
+    new (cache_)
+        PMDKCacheShard(capacity, false /*strict_capcity_limit*/,
+                       high_pri_pool_ratio, use_adaptive_mutex,
+                       kDontChargeCacheMetadata, persist_capacity, (size_t)0);
   }
 
   void Insert(const std::string& key) {
-    cache_->Insert(key, 0 /*hash*/, new Value(key), 1 /*charge*/,
-                    &ValueDeleter, nullptr /*handle*/, Cache::Priority::LOW,
-                    &ValueUnpack, &ValuePack);
+    cache_->Insert(key, 0 /*hash*/, new Value(key), 1 /*charge*/, &ValueDeleter,
+                   nullptr /*handle*/, Cache::Priority::LOW, &ValueUnpack,
+                   &ValuePack);
   }
 
   bool Lookup(const std::string& key) {
@@ -76,7 +76,7 @@ class PMDKCacheTest : public testing::Test {
     PersistentEntry* lru;
     cache_->TEST_GetLRUList(&lru);
     PersistentEntry* iter = lru;
-    for (const auto& key : keys){
+    for (const auto& key : keys) {
       iter = iter->next_lru.get();
       ASSERT_NE(lru, iter);
       ASSERT_EQ(key, std::string(iter->val.get()));
@@ -90,11 +90,11 @@ class PMDKCacheTest : public testing::Test {
 
 TEST_F(PMDKCacheTest, BasicLRU) {
   size_t entry_charge = PMDKCache::GetBasePersistCharge() +
-    sizeof(char) /*key*/ + sizeof(char)+1 /*val*/;
-  NewCache(5, 5*entry_charge);
+                        sizeof(char) /*key*/ + sizeof(char) + 1 /*val*/;
+  NewCache(5, 5 * entry_charge);
   // prepare payloads:
   std::string payloads1[] = {"a", "b", "c", "d", "e"};
-  for (int i = 0; i < 5; i++){
+  for (int i = 0; i < 5; i++) {
     Insert(payloads1[i]);
   }
   ValidateLRUList({"a", "b", "c", "d", "e"});
@@ -120,7 +120,7 @@ TEST_F(PMDKCacheTest, BasicLRU) {
   ValidateLRUList({"e", "z", "d", "u", "v"});
 
   // try recovery
-  NewCache(5, 5*entry_charge);
+  NewCache(5, 5 * entry_charge);
   ValidateLRUList({"e", "z", "d", "u", "v"});
   ASSERT_TRUE(Lookup("e"));
   ASSERT_TRUE(Lookup("z"));

@@ -193,8 +193,8 @@ class SimCacheImpl : public SimCache {
   }
 
   Handle* Lookup(const Slice& key, Statistics* stats,
-                  void* /*(*pack)*/ (const Slice& value),
-                  void /*(*deleter)*/(const Slice&, void* value)) override {
+                 void* /*(*pack)*/ (const Slice& value),
+                 void /*(*deleter)*/ (const Slice&, void* value)) override {
     Handle* h = key_only_cache_->Lookup(key);
     if (h != nullptr) {
       key_only_cache_->Release(h);

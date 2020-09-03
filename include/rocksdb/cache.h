@@ -210,8 +210,9 @@ class Cache {
   // function.
   // TODO: add description about pack and unpack.
   virtual Handle* Lookup(const Slice& key, Statistics* stats = nullptr,
-                            void* (*pack)(const Slice& value) = nullptr,
-                            void (*deleter)(const Slice&, void* value) = nullptr) = 0;
+                         void* (*pack)(const Slice& value) = nullptr,
+                         void (*deleter)(const Slice&,
+                                         void* value) = nullptr) = 0;
 
   // Increments the reference count for the handle if it refers to an entry in
   // the cache. Returns true if refcount was incremented; otherwise, returns
