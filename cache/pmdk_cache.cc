@@ -513,7 +513,13 @@ const CacheShard* PMDKCache::GetShard(int shard) const {
 }
 
 void* PMDKCache::Value(Handle* handle) {
-  return reinterpret_cast<const TransientHandle*>(handle)->value;
+  if (PMDKCacheShard::IsLRUHandle(handle)){
+    // TODO: call LRUCache's Value()
+    assert(false);
+    return nullptr;
+  } else {
+    return reinterpret_cast<const TransientHandle*>(handle)->value;
+  }
 }
 
 size_t PMDKCache::GetBasePersistCharge(){
@@ -522,7 +528,7 @@ size_t PMDKCache::GetBasePersistCharge(){
 
 size_t PMDKCache::GetCharge(Handle* handle) const {
   if (PMDKCacheShard::IsLRUHandle(handle)){
-    // call LRUCache's GetCharge
+    // TODO: call LRUCache's GetCharge
     return 0;
   } else {
     return reinterpret_cast<TransientHandle*>(handle)->p_entry->persist_charge;

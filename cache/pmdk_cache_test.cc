@@ -89,7 +89,8 @@ class PMDKCacheTest : public testing::Test {
 };
 
 TEST_F(PMDKCacheTest, BasicLRU) {
-  size_t entry_charge = PMDKCache::GetBasePersistCharge() + 1 + 2;
+  size_t entry_charge = PMDKCache::GetBasePersistCharge() +
+    sizeof(char) /*key*/ + sizeof(char)+1 /*val*/;
   NewCache(5, 5*entry_charge);
   // prepare payloads:
   std::string payloads1[] = {"a", "b", "c", "d", "e"};
