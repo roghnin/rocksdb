@@ -208,6 +208,8 @@ public:
 struct PersistentRoot{
   po::persistent_ptr<PersistTierHashTable> persistent_hashtable;
   po::persistent_ptr<PersistentEntry> persistent_lru_list;
+  po::p<size_t> usage;
+  po::p<size_t> lru_usage;
   po::p<size_t> era;
 };
 
@@ -326,10 +328,10 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   // TODO: recover memory usage and lru usage data after crash, or consider persisting them.
 
   // Memory size for entries residing in the cache
-  size_t usage_;
+  po::persistent_ptr<size_t> usage_ = nullptr;
 
   // Memory size for entries residing only in the LRU list
-  size_t lru_usage_;
+  po::persistent_ptr<size_t> lru_usage_ = nullptr;
 
   // mutex_ protects the following state.
   // We don't count mutex_ as the cache's internal state so semantically we

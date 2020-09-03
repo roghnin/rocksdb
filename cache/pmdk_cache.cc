@@ -31,8 +31,6 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     : capacity_(capacity),
       persistent_capacity_(persist_capacity),
       strict_capacity_limit_(strict_capacity_limit),
-      usage_(0),
-      lru_usage_(0),
       mutex_(use_adaptive_mutex) {
   set_metadata_charge_policy(metadata_charge_policy);
 
@@ -47,7 +45,11 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
       auto root = pop_.root();
       root->persistent_hashtable = po::make_persistent<PersistTierHashTable>(&pop_);
       root->persistent_lru_list = po::make_persistent<PersistentEntry>();
+      root->usage = 0;
+      root->lru_usage = 0;
       root->era = 0;
+      usage_ = po::persistent_ptr<size_t>(&root->usage.get_rw());
+      lru_usage_ = po::persistent_ptr<size_t>(&root->lru_usage.get_rw());
       persistent_hashtable_ = root->persistent_hashtable;
       lru_ = root->persistent_lru_list;
       // empty circular linked lru list
@@ -59,6 +61,8 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
     pop_ = po::pool<PersistentRoot>::open(heap_file, "pmdk_cache_pool");
     persistent_hashtable_ = pop_.root()->persistent_hashtable;
     persistent_hashtable_->SetPop(&pop_);
+    usage_ = po::persistent_ptr<size_t>(&pop_.root()->usage.get_rw());
+    lru_usage_ = po::persistent_ptr<size_t>(&pop_.root()->lru_usage.get_rw());
     lru_ = pop_.root()->persistent_lru_list;
     era_ = ++pop_.root()->era;
   }
@@ -78,8 +82,8 @@ void PMDKCacheShard::EraseUnRefEntries() {
         persistent_hashtable_->Remove(old);
         old->SetInCache(false);
         size_t total_charge = old->persist_charge;
-        assert(usage_ >= total_charge);
-        usage_ -= total_charge;
+        assert(*usage_ >= total_charge);
+        *usage_ -= total_charge;
         last_reference_list.push_back(old);
       }
     }
@@ -108,32 +112,27 @@ size_t PMDKCacheShard::TEST_GetLRUSize() {
 void PMDKCacheShard::LRU_Remove(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() != nullptr);
   assert(e->prev_lru.get() != nullptr);
-  // po::transaction::run(pop_, [&, e] {
-    e->next_lru->prev_lru = e->prev_lru;
-    e->prev_lru->next_lru = e->next_lru;
-    e->prev_lru = e->next_lru = nullptr;
-  // });
+  e->next_lru->prev_lru = e->prev_lru;
+  e->prev_lru->next_lru = e->next_lru;
+  e->prev_lru = e->next_lru = nullptr;
   size_t persist_charge = e->persist_charge;
-  assert(lru_usage_ >= persist_charge);
-  lru_usage_ -= persist_charge;
+  assert(*lru_usage_ >= persist_charge);
+  *lru_usage_ -= persist_charge;
 }
 
 void PMDKCacheShard::LRU_Insert(po::persistent_ptr<PersistentEntry> e) {
   assert(e->next_lru.get() == nullptr);
   assert(e->prev_lru.get() == nullptr);
-  // po::transaction::run(pop_, [&, e] {
-    // Inset "e" to head of LRU list.
-    e->next_lru = lru_;
-    e->prev_lru = lru_->prev_lru;
-    e->prev_lru->next_lru = e;
-    e->next_lru->prev_lru = e;
-  // });
-  lru_usage_ += e->persist_charge;
+  e->next_lru = lru_;
+  e->prev_lru = lru_->prev_lru;
+  e->prev_lru->next_lru = e;
+  e->next_lru->prev_lru = e;
+  *lru_usage_ += e->persist_charge;
 }
 
 void PMDKCacheShard::EvictFromLRU(size_t charge,
                                  autovector<po::persistent_ptr<PersistentEntry>>* deleted) {
-  while ((usage_ + charge) > persistent_capacity_ && lru_->next_lru != lru_) {
+  while ((*usage_ + charge) > persistent_capacity_ && lru_->next_lru != lru_) {
     po::persistent_ptr<PersistentEntry> old = lru_->next_lru;
     // LRU list contains only elements which can be evicted
     assert(old->InCache() && !old->HasRefs());
@@ -141,8 +140,8 @@ void PMDKCacheShard::EvictFromLRU(size_t charge,
     persistent_hashtable_->Remove(old);
     old->SetInCache(false);
     size_t old_persist_charge = old->persist_charge;
-    assert(usage_ >= old_persist_charge);
-    usage_ -= old_persist_charge;
+    assert(*usage_ >= old_persist_charge);
+    *usage_ -= old_persist_charge;
     deleted->push_back(old);
   }
 }
@@ -257,9 +256,9 @@ bool PMDKCacheShard::Ref(Cache::Handle* h) {
   return true;
 }
 
-// void PMDKCacheShard::SetHighPriorityPoolRatio(double high_pri_pool_ratio) {
-//   // TODO: call transient.
-// }
+void PMDKCacheShard::SetHighPriorityPoolRatio(double /*high_pri_pool_ratio*/) {
+  // TODO: call transient.
+}
 
 bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
   if (handle == nullptr){
@@ -294,7 +293,7 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
           assert(pe == e->p_entry);
 
           // The item is still in cache, and nobody else holds a reference to it
-          if (usage_ > persistent_capacity_ || force_erase){
+          if (*usage_ > persistent_capacity_ || force_erase){
             // The LRU list must be empty since the cache is full
             assert(lru_->next_lru == lru_ || force_erase);
             // Take this opportunity and remove the item
@@ -308,8 +307,8 @@ bool PMDKCacheShard::Release(Cache::Handle* handle, bool force_erase) {
         }
         if (*last_reference_p){
           size_t total_charge = e->p_entry->persist_charge;
-          assert(usage_ >= total_charge);
-          usage_ -= total_charge;
+          assert(*usage_ >= total_charge);
+          *usage_ -= total_charge;
         }
       }
       if (*last_reference_p){
@@ -349,7 +348,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                                     + key.size() + unpacked_val.size();
         EvictFromLRU(persistent_charge, &last_reference_list);
         // TODO: calculate charge and refuse insert if cache is full
-        if ((usage_ + persistent_charge) > persistent_capacity_){
+        if ((*usage_ + persistent_charge) > persistent_capacity_){
           if (handle != nullptr) {
             *handle = nullptr;
             persist_s = Status::Incomplete("Insert failed due to LRU cache being full.");
@@ -371,7 +370,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           pop_.memcpy_persist(pe->val.get(), unpacked_val.data(), unpacked_val.size());
           // insert persistent entry into hash table.
           po::persistent_ptr<PersistentEntry> old = persistent_hashtable_->Insert(pe);
-          usage_ += persistent_charge;
+          *usage_ += persistent_charge;
           if (old.get() != nullptr){
             persist_s = Status::OkOverwritten();
             assert(old->InCache());
@@ -379,8 +378,8 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
             if (!old->HasRefs()){
               LRU_Remove(old);
               size_t old_persist_charge = old->persist_charge;
-              assert(usage_ >= old_persist_charge);
-              usage_ -= old_persist_charge;
+              assert(*usage_ >= old_persist_charge);
+              *usage_ -= old_persist_charge;
               last_reference_list.push_back(old);
             }
           }
@@ -438,8 +437,8 @@ void PMDKCacheShard::Erase(const Slice& key, uint32_t hash) {
           // The entry is in LRU since it's in hash and has no external references
           LRU_Remove(e);
           size_t total_charge = e->persist_charge;
-          assert(usage_ >= total_charge);
-          usage_ -= total_charge;
+          assert(*usage_ >= total_charge);
+          *usage_ -= total_charge;
           last_reference = true;
         }
       }
@@ -452,13 +451,13 @@ void PMDKCacheShard::Erase(const Slice& key, uint32_t hash) {
 
 size_t PMDKCacheShard::GetUsage() const {
   MutexLock l(&mutex_);
-  return usage_;
+  return *usage_;
 }
 
 size_t PMDKCacheShard::GetPinnedUsage() const {
   MutexLock l(&mutex_);
-  assert(usage_ >= lru_usage_);
-  return usage_ - lru_usage_;
+  assert(*usage_ >= *lru_usage_);
+  return *usage_ - *lru_usage_;
 }
 
 std::string PMDKCacheShard::GetPrintableOptions() const {
@@ -529,17 +528,8 @@ uint32_t PMDKCache::GetHash(Handle* handle) const {
 
 void PMDKCache::DisownData() {
 // Do not drop data if compile with ASAN to suppress leak warning.
-#if defined(__clang__)
-#if !defined(__has_feature) || !__has_feature(address_sanitizer)
-  shards_ = nullptr;
-  num_shards_ = 0;
-#endif
-#else  // __clang__
-#ifndef __SANITIZE_ADDRESS__
-  shards_ = nullptr;
-  num_shards_ = 0;
-#endif  // !__SANITIZE_ADDRESS__
-#endif  // __clang__
+// TODO: this is not trivial. We may need to either memcpy all entries with 
+// ref > 0 to DRAM, or abandon everything.
 }
 
 size_t PMDKCache::TEST_GetLRUSize() {
@@ -568,10 +558,6 @@ std::shared_ptr<Cache> NewPMDKCache(
   if (num_shard_bits >= 20) {
     return nullptr;  // the cache cannot be sharded into too many fine pieces
   }
-  // if (high_pri_pool_ratio < 0.0 || high_pri_pool_ratio > 1.0) {
-  //   // invalid high_pri_pool_ratio
-  //   return nullptr;
-  // }
   if (num_shard_bits < 0) {
     num_shard_bits = GetDefaultCacheShardBits(capacity);
   }
