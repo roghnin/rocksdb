@@ -2,7 +2,6 @@
 //  This source code is licensed under both the GPLv2 (found in the
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
-
 #ifndef GFLAGS
 #include <cstdio>
 int main() {
@@ -150,28 +149,39 @@ struct KeyGen {
   }
 };
 
-char* createValue(Random64& rnd) {
+struct Value {
+  Slice slice;
+  bool persistent;
+  Value(const char* data, size_t size, bool persist = false) : 
+    slice(data, size), persistent(persist) {}
+  Value(const Slice& s, bool persist = true) : 
+    slice(s), persistent(persist) {}
+};
+
+void* createValue(Random64& rnd) {
   char* rv = new char[FLAGS_value_bytes];
   // Fill with some filler data, and take some CPU time
   for (uint32_t i = 0; i < FLAGS_value_bytes; i += 8) {
     EncodeFixed64(rv + i, rnd.Next());
   }
-  return rv;
+  return new Value(rv, FLAGS_value_bytes);
 }
 
 void deleter(const Slice& /*key*/, void* value) {
-  delete[] static_cast<char*>(value);
+  Value* val = reinterpret_cast<Value*>(value);
+  if (val->persistent == false){
+    delete[] const_cast<char*>(val->slice.data());
+  }
+  delete val;
 }
 }  // namespace
 
 const Slice unpack(void* value) {
-  return Slice((char*)value, FLAGS_value_bytes);
+  return reinterpret_cast<Value*>(value)->slice;
 }
 
 void* pack(const Slice& value) {
-  char* ret = new char[FLAGS_value_bytes];
-  memcpy(ret, value.data(), FLAGS_value_bytes);
-  return ret;
+  return new Value(value);
 }
 
 class CacheBench {
