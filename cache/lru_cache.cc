@@ -268,10 +268,7 @@ void LRUCacheShard::SetStrictCapacityLimit(bool strict_capacity_limit) {
   strict_capacity_limit_ = strict_capacity_limit;
 }
 
-Cache::Handle* LRUCacheShard::Lookup(const Slice& key, uint32_t hash,
-                                     void* /*(*pack)*/ (const Slice& value),
-                                     void /*(*deleter)*/ (const Slice&,
-                                                          void* value)) {
+Cache::Handle* LRUCacheShard::Lookup(const Slice& key, uint32_t hash) {
   MutexLock l(&mutex_);
   LRUHandle* e = table_.Lookup(key, hash);
   if (e != nullptr) {
@@ -342,9 +339,7 @@ bool LRUCacheShard::Release(Cache::Handle* handle, bool force_erase) {
 Status LRUCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                              size_t charge,
                              void (*deleter)(const Slice& key, void* value),
-                             Cache::Handle** handle, Cache::Priority priority,
-                             const Slice /*(*unpack)*/ (void* value),
-                             void* /*(*pack)*/ (const Slice& value)) {
+                             Cache::Handle** handle, Cache::Priority priority) {
   // Allocate the memory here outside of the mutex
   // If the cache is full, we'll have to release it
   // It shouldn't happen very often though.

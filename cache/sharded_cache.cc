@@ -45,21 +45,15 @@ void ShardedCache::SetStrictCapacityLimit(bool strict_capacity_limit) {
 
 Status ShardedCache::Insert(const Slice& key, void* value, size_t charge,
                             void (*deleter)(const Slice& key, void* value),
-                            Handle** handle, Priority priority,
-                            const Slice (*unpack)(void* value),
-                            void* (*pack)(const Slice& value)) {
+                            Handle** handle, Priority priority) {
   uint32_t hash = HashSlice(key);
   return GetShard(Shard(hash))
-      ->Insert(key, hash, value, charge, deleter, handle, priority, unpack,
-               pack);
+      ->Insert(key, hash, value, charge, deleter, handle, priority);
 }
 
-Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/,
-                                    void* (*pack)(const Slice& value),
-                                    void (*deleter)(const Slice&,
-                                                    void* value)) {
+Cache::Handle* ShardedCache::Lookup(const Slice& key, Statistics* /*stats*/) {
   uint32_t hash = HashSlice(key);
-  return GetShard(Shard(hash))->Lookup(key, hash, pack, deleter);
+  return GetShard(Shard(hash))->Lookup(key, hash);
 }
 
 bool ShardedCache::Ref(Handle* handle) {

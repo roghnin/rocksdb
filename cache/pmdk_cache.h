@@ -42,8 +42,6 @@ struct TransientHandle {
   void* value;
   // a fixed number to tell TransientHandle and LRUHandle apart.
   void* type = reinterpret_cast<void*>(0x1);
-  // deleter of *value
-  void (*deleter)(const Slice& key, void* value);
   // length of key on persistent memory.
   size_t key_length;
   // The hash of key(). Used for fast sharding and comparisons.
@@ -225,7 +223,10 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                  double high_pri_pool_ratio, bool use_adaptive_mutex,
                  CacheMetadataChargePolicy metadata_charge_policy,
-                 size_t persist_capacity, size_t shard_id);
+                 size_t persist_capacity, size_t shard_id,
+                 void* (*pack)(const Slice& value),
+                 const Slice (*unpack)(void* value),
+                 void (*val_deleter)(const Slice& key, void* value));
   ~PMDKCacheShard();
 
   // Separate from constructor so caller can easily make an array of PMDKCache
@@ -243,13 +244,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   // Like Cache methods, but with an extra "hash" parameter.
   Status Insert(const Slice& key, uint32_t hash, void* value, size_t charge,
                 void (*deleter)(const Slice& key, void* value),
-                Cache::Handle** handle, Cache::Priority priority,
-                const Slice (*unpack)(void* value) = nullptr,
-                void* (*pack)(const Slice& value) = nullptr) override;
-  Cache::Handle* Lookup(const Slice& key, uint32_t hash,
-                        void* (*pack)(const Slice& value) = nullptr,
-                        void (*deleter)(const Slice&,
-                                        void* value) = nullptr) override;
+                Cache::Handle** handle, Cache::Priority priority) override;
+  Cache::Handle* Lookup(const Slice& key, uint32_t hash) override;
   bool Ref(Cache::Handle* handle) override;
   bool Release(Cache::Handle* handle, bool force_erase = false) override;
   void Erase(const Slice& key, uint32_t hash) override;
@@ -283,10 +279,7 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
   void LRU_Remove(po::persistent_ptr<PersistentEntry> e);
   void LRU_Insert(po::persistent_ptr<PersistentEntry> e);
 
-  TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e,
-                                      void* (*pack)(const Slice& slice),
-                                      void (*deleter)(const Slice& key,
-                                                      void* value));
+  TransientHandle* GetTransientHandle(po::persistent_ptr<PersistentEntry> e);
 
   void FreePEntry(po::persistent_ptr<PersistentEntry> e);
 
@@ -314,6 +307,12 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
 
   // Current era number. Advanced every crash.
   size_t era_;
+
+  // Pack and unpack function to transform between persistent data and
+  // transient value.
+  void* (*pack_)(const Slice& value);
+  const Slice (*unpack_)(void* value);
+  void (*val_deleter_)(const Slice& key, void* value);
 
   // ------------^^^^^^^^^^^^^-----------
   // Not frequently modified data members
@@ -351,6 +350,9 @@ class PMDKCache
  public:
   PMDKCache(size_t capacity, int num_shard_bits, bool strict_capacity_limit,
             double high_pri_pool_ratio, size_t persist_capacity,
+            void* (*pack)(const Slice& value),
+            const Slice (*unpack)(void* value),
+            void (*val_deleter)(const Slice& key, void* value),
             std::shared_ptr<MemoryAllocator> memory_allocator = nullptr,
             bool use_adaptive_mutex = kDefaultToAdaptiveMutex,
             CacheMetadataChargePolicy metadata_charge_policy =

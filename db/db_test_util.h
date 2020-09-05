@@ -739,16 +739,11 @@ class CacheWrapper : public Cache {
 
   Status Insert(const Slice& key, void* value, size_t charge,
                 void (*deleter)(const Slice& key, void* value),
-                Handle** handle = nullptr, Priority priority = Priority::LOW,
-                const Slice /*(*unpack)*/ (void* value) = nullptr,
-                void* /*(*pack)*/ (const Slice& value) = nullptr) override {
+                Handle** handle = nullptr, Priority priority = Priority::LOW) override {
     return target_->Insert(key, value, charge, deleter, handle, priority);
   }
 
-  Handle* Lookup(const Slice& key, Statistics* stats = nullptr,
-                 void* /*(*pack)*/ (const Slice& value) = nullptr,
-                 void /*(*deleter)*/ (const Slice&,
-                                      void* value) = nullptr) override {
+  Handle* Lookup(const Slice& key, Statistics* stats = nullptr) override {
     return target_->Lookup(key, stats);
   }
 

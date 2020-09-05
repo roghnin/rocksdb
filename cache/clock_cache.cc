@@ -270,13 +270,8 @@ class ClockCacheShard final : public CacheShard {
   void SetStrictCapacityLimit(bool strict_capacity_limit) override;
   Status Insert(const Slice& key, uint32_t hash, void* value, size_t charge,
                 void (*deleter)(const Slice& key, void* value),
-                Cache::Handle** handle, Cache::Priority priority,
-                const Slice /*(*unpack)*/ (void* value),
-                void* /*(*pack)*/ (const Slice& value)) override;
-  Cache::Handle* Lookup(const Slice& key, uint32_t hash,
-                        void* /*(*pack)*/ (const Slice& value),
-                        void /*(*deleter)*/ (const Slice&,
-                                             void* value)) override;
+                Cache::Handle** handle, Cache::Priority priority) override;
+  Cache::Handle* Lookup(const Slice& key, uint32_t hash) override;
   // If the entry in in cache, increase reference count and return true.
   // Return false otherwise.
   //
@@ -621,9 +616,7 @@ Status ClockCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                                size_t charge,
                                void (*deleter)(const Slice& key, void* value),
                                Cache::Handle** out_handle,
-                               Cache::Priority /*priority*/,
-                               const Slice /*(*unpack)*/ (void* value),
-                               void* /*(*pack)*/ (const Slice& value)) {
+                               Cache::Priority /*priority*/) {
   CleanupContext context;
   HashTable::accessor accessor;
   char* key_data = new char[key.size()];
@@ -648,10 +641,7 @@ Status ClockCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
   return s;
 }
 
-Cache::Handle* ClockCacheShard::Lookup(const Slice& key, uint32_t hash,
-                                       void* /*(*pack)*/ (const Slice& value),
-                                       void /*(*deleter)*/ (const Slice&,
-                                                            void* value)) {
+Cache::Handle* ClockCacheShard::Lookup(const Slice& key, uint32_t hash) {
   HashTable::const_accessor accessor;
   if (!table_.find(accessor, CacheKey(key, hash))) {
     return nullptr;

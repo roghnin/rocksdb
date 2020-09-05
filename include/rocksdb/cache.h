@@ -122,7 +122,11 @@ extern std::shared_ptr<Cache> NewLRUCache(
 extern std::shared_ptr<Cache> NewLRUCache(const LRUCacheOptions& cache_opts);
 
 extern std::shared_ptr<Cache> NewPMDKCache(
-    size_t capacity, size_t persist_capacity, int num_shard_bits = -1,
+    size_t capacity, size_t persist_capacity,
+    void* (*pack)(const Slice& value),
+    const Slice (*unpack)(void* value),
+    void (*val_deleter)(const Slice& key, void* value),
+    int num_shard_bits = -1,
     bool strict_capacity_limit = false, double high_pri_pool_ratio = 0.5,
     std::shared_ptr<MemoryAllocator> memory_allocator = nullptr,
     bool use_adaptive_mutex = kDefaultToAdaptiveMutex,
@@ -193,13 +197,10 @@ class Cache {
   //
   // When the inserted entry is no longer needed, the key and
   // value will be passed to "deleter".
-  // TODO: add description about pack and unpack.
   virtual Status Insert(const Slice& key, void* value, size_t charge,
                         void (*deleter)(const Slice& key, void* value),
                         Handle** handle = nullptr,
-                        Priority priority = Priority::LOW,
-                        const Slice (*unpack)(void* value) = nullptr,
-                        void* (*pack)(const Slice& value) = nullptr) = 0;
+                        Priority priority = Priority::LOW) = 0;
 
   // If the cache has no mapping for "key", returns nullptr.
   //
@@ -208,11 +209,7 @@ class Cache {
   // longer needed.
   // If stats is not nullptr, relative tickers could be used inside the
   // function.
-  // TODO: add description about pack and unpack.
-  virtual Handle* Lookup(const Slice& key, Statistics* stats = nullptr,
-                         void* (*pack)(const Slice& value) = nullptr,
-                         void (*deleter)(const Slice&,
-                                         void* value) = nullptr) = 0;
+  virtual Handle* Lookup(const Slice& key, Statistics* stats = nullptr) = 0;
 
   // Increments the reference count for the handle if it refers to an entry in
   // the cache. Returns true if refcount was incremented; otherwise, returns

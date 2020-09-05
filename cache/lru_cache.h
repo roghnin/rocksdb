@@ -211,13 +211,8 @@ class ALIGN_AS(CACHE_LINE_SIZE) LRUCacheShard final : public CacheShard {
   virtual Status Insert(const Slice& key, uint32_t hash, void* value,
                         size_t charge,
                         void (*deleter)(const Slice& key, void* value),
-                        Cache::Handle** handle, Cache::Priority priority,
-                        const Slice /*(*unpack)*/ (void* value),
-                        void* /*(*pack)*/ (const Slice& value)) override;
-  virtual Cache::Handle* Lookup(const Slice& key, uint32_t hash,
-                                void* /*(*pack)*/ (const Slice& value),
-                                void /*(*deleter)*/ (const Slice&,
-                                                     void* value)) override;
+                        Cache::Handle** handle, Cache::Priority priority) override;
+  virtual Cache::Handle* Lookup(const Slice& key, uint32_t hash) override;
   virtual bool Ref(Cache::Handle* handle) override;
   virtual bool Release(Cache::Handle* handle,
                        bool force_erase = false) override;

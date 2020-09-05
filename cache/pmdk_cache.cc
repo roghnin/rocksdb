@@ -27,10 +27,14 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                                double /*high_pri_pool_ratio*/,
                                bool use_adaptive_mutex,
                                CacheMetadataChargePolicy metadata_charge_policy,
-                               size_t persist_capacity, size_t shard_id)
+                               size_t persist_capacity, size_t shard_id,
+                               void* (*pack)(const Slice& value),
+                               const Slice (*unpack)(void* value),
+                               void (*val_deleter)(const Slice& key, void* value))
     : capacity_(capacity),
       persistent_capacity_(persist_capacity),
       strict_capacity_limit_(strict_capacity_limit),
+      pack_(pack), unpack_(unpack), val_deleter_(val_deleter),
       mutex_(use_adaptive_mutex) {
   set_metadata_charge_policy(metadata_charge_policy);
 
@@ -166,8 +170,7 @@ void PMDKCacheShard::EvictFromLRU(
 }
 
 TransientHandle* PMDKCacheShard::GetTransientHandle(
-    po::persistent_ptr<PersistentEntry> e, void* (*pack)(const Slice& slice),
-    void (*deleter)(const Slice& key, void* value)) {
+    po::persistent_ptr<PersistentEntry> e) {
   if (e.get() == nullptr) {
     return nullptr;
   }
@@ -182,14 +185,12 @@ TransientHandle* PMDKCacheShard::GetTransientHandle(
   TransientHandle* ret = e->trans_handle;
   if (!ret) {
     // build a TransientHandle.
-    assert(deleter != nullptr);
     ret = new TransientHandle();
     ret->key_data = e->key.get();
     ret->key_length = e->key_size;
     ret->hash = e->hash;
-    ret->value = pack(Slice(e->val.get(), e->val_size));
+    ret->value = pack_(Slice(e->val.get(), e->val_size));
     ret->p_entry = e.get();
-    ret->deleter = deleter;
     e->trans_handle = ret;  // no need to be in transaction. It's transient.
   }
   return ret;
@@ -204,7 +205,7 @@ void PMDKCacheShard::FreePEntry(po::persistent_ptr<PersistentEntry> e) {
   // free transient handle first, since the deleter may use e->key and/or
   // e->value.
   if (e->era == era_ && e->trans_handle != nullptr) {
-    (*e->trans_handle->deleter)(Slice(e->val.get(), e->val_size),
+    (*val_deleter_)(Slice(e->val.get(), e->val_size),
                                 e->trans_handle->value);
     delete e->trans_handle;
   }
@@ -246,10 +247,7 @@ void PMDKCacheShard::SetStrictCapacityLimit(bool /*strict_capacity_limit*/) {
   // TODO: call transient SetStrictCapacityLimit().
 }
 
-Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
-                                      void* (*pack)(const Slice& slice),
-                                      void (*deleter)(const Slice&,
-                                                      void* value)) {
+Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash) {
   MutexLock l(&mutex_);
   // TODO: lookup transient hash table
 
@@ -258,7 +256,7 @@ Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash,
       persistent_hashtable_->Lookup(key, hash);
   TransientHandle* th = nullptr;
   if (e.get() != nullptr) {
-    th = GetTransientHandle(e, pack, deleter);
+    th = GetTransientHandle(e);
     assert(e->InCache());
     if (!e->HasRefs()) {
       LRU_Remove(e);
@@ -350,9 +348,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
                               size_t /*charge*/,
                               void (*deleter)(const Slice& key, void* value),
                               Cache::Handle** handle,
-                              Cache::Priority /*priority*/,
-                              const Slice (*unpack)(void* packed),
-                              void* (*pack)(const Slice& value)) {
+                              Cache::Priority /*priority*/) {
   Status s;
   Status* s_p = &s;
 
@@ -366,9 +362,10 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
         MutexLock l(&mutex_);
         // insert into persistent tier first, since failed insertion into
         // transient tier may end up deleting value.
-        if (unpack != nullptr) {
-          assert(deleter != nullptr && pack != nullptr);
-          const Slice& unpacked_val = unpack(value);
+        // TDOO: better condition for skipping persistent insert.
+        if (unpack_ != nullptr) {
+          assert(deleter != nullptr && pack_ != nullptr);
+          const Slice& unpacked_val = unpack_(value);
           size_t persistent_charge = PMDKCache::GetBasePersistCharge() +
                                     key.size() + unpacked_val.size();
           EvictFromLRU(persistent_charge, &last_reference_list);
@@ -415,7 +412,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
               LRU_Insert(pe);
             }
           }
-        }  // if (unpack != nullptr)
+        }  // if (unpack_ != nullptr)
 
         // TODO: insert into transient tier, and delete the following line.
         transient_s = Status::Incomplete("not inserted into transient tier");
@@ -427,7 +424,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
           if ((persist_s == Status::OK() ||
               persist_s == Status::OkOverwritten()) &&
               handle != nullptr) {
-            TransientHandle* e = GetTransientHandle(pe, pack, deleter);
+            TransientHandle* e = GetTransientHandle(pe);
             e->Ref();
             *handle = reinterpret_cast<Cache::Handle*>(e);
           }
@@ -512,6 +509,9 @@ std::string PMDKCacheShard::GetPrintableOptions() const {
 PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
                      bool strict_capacity_limit, double high_pri_pool_ratio,
                      size_t persist_capacity,
+                     void* (*pack)(const Slice& value),
+                     const Slice (*unpack)(void* value),
+                     void (*val_deleter)(const Slice& key, void* value),
                      std::shared_ptr<MemoryAllocator> allocator,
                      bool use_adaptive_mutex,
                      CacheMetadataChargePolicy metadata_charge_policy)
@@ -528,7 +528,7 @@ PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
     new (&shards_[i])
         PMDKCacheShard(per_shard, strict_capacity_limit, high_pri_pool_ratio,
                        use_adaptive_mutex, metadata_charge_policy,
-                       per_shard_persist, (size_t)i);
+                       per_shard_persist, (size_t)i, pack, unpack, val_deleter);
   }
 }
 
@@ -591,18 +591,23 @@ size_t PMDKCache::TEST_GetLRUSize() {
   return lru_size_of_all_shards;
 }
 
-std::shared_ptr<Cache> NewPMDKCache(const LRUCacheOptions& cache_opts) {
-  // TODO: make this dynamic:
-  size_t persist_capacity = 1024 * 1024 * 1024;
-  return NewPMDKCache(
-      cache_opts.capacity, persist_capacity, cache_opts.num_shard_bits,
-      cache_opts.strict_capacity_limit, cache_opts.high_pri_pool_ratio,
-      cache_opts.memory_allocator, cache_opts.use_adaptive_mutex,
-      cache_opts.metadata_charge_policy);
-}
+// TDOO: add options in LRUCacheOptions
+// std::shared_ptr<Cache> NewPMDKCache(const LRUCacheOptions& cache_opts) {
+//   // TODO: make this dynamic:
+//   size_t persist_capacity = 1024 * 1024 * 1024;
+//   return NewPMDKCache(
+//       cache_opts.capacity, persist_capacity, cache_opts.num_shard_bits,
+//       cache_opts.strict_capacity_limit, cache_opts.high_pri_pool_ratio,
+//       cache_opts.memory_allocator, cache_opts.use_adaptive_mutex,
+//       cache_opts.metadata_charge_policy);
+// }
 
 std::shared_ptr<Cache> NewPMDKCache(
-    size_t capacity, size_t persist_capacity, int num_shard_bits,
+    size_t capacity, size_t persist_capacity,
+    void* (*pack)(const Slice& value),
+    const Slice (*unpack)(void* value),
+    void (*val_deleter)(const Slice& key, void* value),
+    int num_shard_bits,
     bool strict_capacity_limit, double high_pri_pool_ratio,
     std::shared_ptr<MemoryAllocator> memory_allocator, bool use_adaptive_mutex,
     CacheMetadataChargePolicy metadata_charge_policy) {
@@ -615,7 +620,8 @@ std::shared_ptr<Cache> NewPMDKCache(
 
   return std::make_shared<PMDKCache>(
       capacity, num_shard_bits, strict_capacity_limit, high_pri_pool_ratio,
-      persist_capacity, std::move(memory_allocator), use_adaptive_mutex,
+      persist_capacity, pack, unpack, val_deleter,
+      std::move(memory_allocator), use_adaptive_mutex,
       metadata_charge_policy);
 }
 
