@@ -2,7 +2,6 @@
 //  This source code is licensed under both the GPLv2 (found in the
 //  COPYING file in the root directory) and Apache 2.0 License
 //  (found in the LICENSE.Apache file in the root directory).
-
 #ifndef GFLAGS
 #include <cstdio>
 int main() {
@@ -57,6 +56,7 @@ DEFINE_uint32(erase_percent, 1,
               "Ratio of erase to total workload (expressed as a percentage)");
 
 DEFINE_bool(use_clock_cache, false, "");
+DEFINE_bool(use_pmdk_cache, false, "");
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -149,19 +149,40 @@ struct KeyGen {
   }
 };
 
-char* createValue(Random64& rnd) {
+struct Value {
+  Slice slice;
+  bool persistent;
+  Value(const char* data, size_t size, bool persist = false) : 
+    slice(data, size), persistent(persist) {}
+  Value(const Slice& s, bool persist = true) : 
+    slice(s), persistent(persist) {}
+};
+
+void* createValue(Random64& rnd) {
   char* rv = new char[FLAGS_value_bytes];
   // Fill with some filler data, and take some CPU time
   for (uint32_t i = 0; i < FLAGS_value_bytes; i += 8) {
     EncodeFixed64(rv + i, rnd.Next());
   }
-  return rv;
+  return new Value(rv, FLAGS_value_bytes);
 }
 
 void deleter(const Slice& /*key*/, void* value) {
-  delete[] static_cast<char*>(value);
+  Value* val = reinterpret_cast<Value*>(value);
+  if (val->persistent == false){
+    delete[] const_cast<char*>(val->slice.data());
+  }
+  delete val;
 }
 }  // namespace
+
+const Slice unpack(void* value) {
+  return reinterpret_cast<Value*>(value)->slice;
+}
+
+void* pack(const Slice& value) {
+  return new Value(value);
+}
 
 class CacheBench {
   static constexpr uint64_t kHundredthUint64 =
@@ -189,6 +210,12 @@ class CacheBench {
         fprintf(stderr, "Clock cache not supported.\n");
         exit(1);
       }
+    } else if (FLAGS_use_pmdk_cache) {
+      cache_ = NewPMDKCache(0, FLAGS_cache_size + 1024, &pack, &unpack, 
+        &deleter, FLAGS_num_shard_bits);
+      // TODO: get rid of those hard-coded numbers.
+      max_key_ = static_cast<uint64_t>(FLAGS_cache_size / FLAGS_resident_ratio /
+                                       (FLAGS_value_bytes + 8 + 152));
     } else {
       cache_ = NewLRUCache(FLAGS_cache_size, FLAGS_num_shard_bits);
     }
@@ -204,7 +231,8 @@ class CacheBench {
     KeyGen keygen;
     for (uint64_t i = 0; i < 2 * FLAGS_cache_size; i += FLAGS_value_bytes) {
       cache_->Insert(keygen.GetRand(rnd, max_key_), createValue(rnd),
-                     FLAGS_value_bytes, &deleter);
+                     FLAGS_value_bytes, &deleter, nullptr /*handle*/,
+                     Cache::Priority::LOW);
     }
   }
 
@@ -247,7 +275,7 @@ class CacheBench {
 
  private:
   std::shared_ptr<Cache> cache_;
-  const uint64_t max_key_;
+  uint64_t max_key_;
   // Cumulative thresholds in the space of a random uint64_t
   const uint64_t lookup_insert_threshold_;
   const uint64_t insert_threshold_;
@@ -294,7 +322,7 @@ class CacheBench {
           handle = nullptr;
         }
         // do lookup
-        handle = cache_->Lookup(key);
+        handle = cache_->Lookup(key, nullptr /*stats*/);
         if (handle) {
           // do something with the data
           result += NPHash64(static_cast<char*>(cache_->Value(handle)),
@@ -302,7 +330,7 @@ class CacheBench {
         } else {
           // do insert
           cache_->Insert(key, createValue(thread->rnd), FLAGS_value_bytes,
-                         &deleter, &handle);
+                         &deleter, &handle, Cache::Priority::LOW);
         }
       } else if (random_op < insert_threshold_) {
         if (handle) {
@@ -311,14 +339,14 @@ class CacheBench {
         }
         // do insert
         cache_->Insert(key, createValue(thread->rnd), FLAGS_value_bytes,
-                       &deleter, &handle);
+                       &deleter, &handle, Cache::Priority::LOW);
       } else if (random_op < lookup_threshold_) {
         if (handle) {
           cache_->Release(handle);
           handle = nullptr;
         }
         // do lookup
-        handle = cache_->Lookup(key);
+        handle = cache_->Lookup(key, nullptr /*stats*/);
         if (handle) {
           // do something with the data
           result += NPHash64(static_cast<char*>(cache_->Value(handle)),
