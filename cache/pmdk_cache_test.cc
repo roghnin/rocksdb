@@ -50,17 +50,17 @@ class PMDKCacheTest : public testing::Test {
     new (cache_)
         PMDKCacheShard(capacity, false /*strict_capcity_limit*/,
                        high_pri_pool_ratio, use_adaptive_mutex,
-                       kDontChargeCacheMetadata, persist_capacity, (size_t)0);
+                       kDontChargeCacheMetadata, persist_capacity, (size_t)0,
+                       &ValuePack, &ValueUnpack, &ValueDeleter);
   }
 
   void Insert(const std::string& key) {
     cache_->Insert(key, 0 /*hash*/, new Value(key), 1 /*charge*/, &ValueDeleter,
-                   nullptr /*handle*/, Cache::Priority::LOW, &ValueUnpack,
-                   &ValuePack);
+                   nullptr /*handle*/, Cache::Priority::LOW);
   }
 
   bool Lookup(const std::string& key) {
-    auto handle = cache_->Lookup(key, 0 /*hash*/, &ValuePack, &ValueDeleter);
+    auto handle = cache_->Lookup(key, 0 /*hash*/, &ValueDeleter);
     if (handle) {
       cache_->Release(handle);
       return true;

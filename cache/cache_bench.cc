@@ -211,7 +211,8 @@ class CacheBench {
         exit(1);
       }
     } else if (FLAGS_use_pmdk_cache) {
-      cache_ = NewPMDKCache(0, FLAGS_cache_size + 1024, FLAGS_num_shard_bits);
+      cache_ = NewPMDKCache(0, FLAGS_cache_size + 1024, &pack, &unpack, 
+        &deleter, FLAGS_num_shard_bits);
       // TODO: get rid of those hard-coded numbers.
       max_key_ = static_cast<uint64_t>(FLAGS_cache_size / FLAGS_resident_ratio /
                                        (FLAGS_value_bytes + 8 + 152));
@@ -231,7 +232,7 @@ class CacheBench {
     for (uint64_t i = 0; i < 2 * FLAGS_cache_size; i += FLAGS_value_bytes) {
       cache_->Insert(keygen.GetRand(rnd, max_key_), createValue(rnd),
                      FLAGS_value_bytes, &deleter, nullptr /*handle*/,
-                     Cache::Priority::LOW, &unpack, &pack);
+                     Cache::Priority::LOW);
     }
   }
 
@@ -321,7 +322,7 @@ class CacheBench {
           handle = nullptr;
         }
         // do lookup
-        handle = cache_->Lookup(key, nullptr /*stats*/, &pack, &deleter);
+        handle = cache_->Lookup(key, nullptr /*stats*/);
         if (handle) {
           // do something with the data
           result += NPHash64(static_cast<char*>(cache_->Value(handle)),
@@ -329,8 +330,7 @@ class CacheBench {
         } else {
           // do insert
           cache_->Insert(key, createValue(thread->rnd), FLAGS_value_bytes,
-                         &deleter, &handle, Cache::Priority::LOW, &unpack,
-                         &pack);
+                         &deleter, &handle, Cache::Priority::LOW);
         }
       } else if (random_op < insert_threshold_) {
         if (handle) {
@@ -339,14 +339,14 @@ class CacheBench {
         }
         // do insert
         cache_->Insert(key, createValue(thread->rnd), FLAGS_value_bytes,
-                       &deleter, &handle, Cache::Priority::LOW, &unpack, &pack);
+                       &deleter, &handle, Cache::Priority::LOW);
       } else if (random_op < lookup_threshold_) {
         if (handle) {
           cache_->Release(handle);
           handle = nullptr;
         }
         // do lookup
-        handle = cache_->Lookup(key, nullptr /*stats*/, &pack, &deleter);
+        handle = cache_->Lookup(key, nullptr /*stats*/);
         if (handle) {
           // do something with the data
           result += NPHash64(static_cast<char*>(cache_->Value(handle)),
