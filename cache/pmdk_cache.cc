@@ -19,7 +19,7 @@
 // TODO: make these run-time variables
 // #define PHEAP_PATH "/mnt/pmem/pmdk_cache/"
 #define PHEAP_PATH "/dev/shm/pmdk_cache/"
-#define PMEMOBJ_POOL_SIZE ((size_t)024 * 1024 * 1024 * 2)
+#define PMEMOBJ_POOL_SIZE ((size_t)1024 * 1024 * 1024 * 2)
 
 namespace ROCKSDB_NAMESPACE {
 
