@@ -40,7 +40,7 @@ CompactionIterator::CompactionIterator(
     const CompactionFilter* compaction_filter,
     const std::atomic<bool>* shutting_down,
     const SequenceNumber preserve_deletes_seqnum,
-    const std::atomic<bool>* manual_compaction_paused,
+    const std::atomic<int>* manual_compaction_paused,
     const std::shared_ptr<Logger> info_log)
     : CompactionIterator(
           input, cmp, merge_helper, last_sequence, snapshots,
@@ -62,7 +62,7 @@ CompactionIterator::CompactionIterator(
     const CompactionFilter* compaction_filter,
     const std::atomic<bool>* shutting_down,
     const SequenceNumber preserve_deletes_seqnum,
-    const std::atomic<bool>* manual_compaction_paused,
+    const std::atomic<int>* manual_compaction_paused,
     const std::shared_ptr<Logger> info_log)
     : input_(input),
       cmp_(cmp),
@@ -86,8 +86,10 @@ CompactionIterator::CompactionIterator(
       info_log_(info_log) {
   assert(compaction_filter_ == nullptr || compaction_ != nullptr);
   assert(snapshots_ != nullptr);
-  bottommost_level_ =
-      compaction_ == nullptr ? false : compaction_->bottommost_level();
+  bottommost_level_ = compaction_ == nullptr
+                          ? false
+                          : compaction_->bottommost_level() &&
+                                !compaction_->allow_ingest_behind();
   if (compaction_ != nullptr) {
     level_ptrs_ = std::vector<size_t>(compaction_->number_levels(), 0);
   }

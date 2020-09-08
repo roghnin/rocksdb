@@ -328,8 +328,9 @@ CompactionJob::CompactionJob(
     const SnapshotChecker* snapshot_checker, std::shared_ptr<Cache> table_cache,
     EventLogger* event_logger, bool paranoid_file_checks, bool measure_io_stats,
     const std::string& dbname, CompactionJobStats* compaction_job_stats,
-    Env::Priority thread_pri, const std::atomic<bool>* manual_compaction_paused,
-    const std::string& db_id, const std::string& db_session_id)
+    Env::Priority thread_pri, const std::shared_ptr<IOTracer>& io_tracer,
+    const std::atomic<int>* manual_compaction_paused, const std::string& db_id,
+    const std::string& db_session_id)
     : job_id_(job_id),
       compact_(new CompactionState(compaction)),
       compaction_job_stats_(compaction_job_stats),
@@ -340,7 +341,7 @@ CompactionJob::CompactionJob(
       db_options_(db_options),
       file_options_(file_options),
       env_(db_options.env),
-      fs_(db_options.fs.get()),
+      fs_(db_options.fs, io_tracer),
       file_options_for_read_(
           fs_->OptimizeForCompactionTableRead(file_options, db_options_)),
       versions_(versions),
@@ -928,7 +929,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   TEST_SYNC_POINT_CALLBACK(
       "CompactionJob::Run():PausingManualCompaction:1",
       reinterpret_cast<void*>(
-          const_cast<std::atomic<bool>*>(manual_compaction_paused_)));
+          const_cast<std::atomic<int>*>(manual_compaction_paused_)));
 
   Slice* start = sub_compact->start;
   Slice* end = sub_compact->end;
@@ -1022,7 +1023,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
     TEST_SYNC_POINT_CALLBACK(
         "CompactionJob::Run():PausingManualCompaction:2",
         reinterpret_cast<void*>(
-            const_cast<std::atomic<bool>*>(manual_compaction_paused_)));
+            const_cast<std::atomic<int>*>(manual_compaction_paused_)));
     if (partitioner.get()) {
       last_key_for_partitioner.assign(c_iter->user_key().data_,
                                       c_iter->user_key().size_);
@@ -1089,7 +1090,7 @@ void CompactionJob::ProcessKeyValueCompaction(SubcompactionState* sub_compact) {
   }
   if ((status.ok() || status.IsColumnFamilyDropped()) &&
       (manual_compaction_paused_ &&
-       manual_compaction_paused_->load(std::memory_order_relaxed))) {
+       manual_compaction_paused_->load(std::memory_order_relaxed) > 0)) {
     status = Status::Incomplete(Status::SubCode::kManualCompactionPaused);
   }
   if (status.ok()) {
@@ -1197,6 +1198,8 @@ Status CompactionJob::FinishCompactionOutputFile(
 
   ColumnFamilyData* cfd = sub_compact->compaction->column_family_data();
   const Comparator* ucmp = cfd->user_comparator();
+  std::string file_checksum = kUnknownFileChecksum;
+  std::string file_checksum_func_name = kUnknownFileChecksumFuncName;
 
   // Check for iterator errors
   Status s = input_status;
@@ -1396,6 +1399,8 @@ Status CompactionJob::FinishCompactionOutputFile(
     meta->file_checksum = sub_compact->outfile->GetFileChecksum();
     meta->file_checksum_func_name =
         sub_compact->outfile->GetFileChecksumFuncName();
+    file_checksum = meta->file_checksum;
+    file_checksum_func_name = meta->file_checksum_func_name;
   }
   if (s.ok()) {
     s = io_s;
@@ -1452,7 +1457,8 @@ Status CompactionJob::FinishCompactionOutputFile(
   EventHelpers::LogAndNotifyTableFileCreationFinished(
       event_logger_, cfd->ioptions()->listeners, dbname_, cfd->GetName(), fname,
       job_id_, output_fd, oldest_blob_file_number, tp,
-      TableFileCreationReason::kCompaction, s);
+      TableFileCreationReason::kCompaction, s, file_checksum,
+      file_checksum_func_name);
 
 #ifndef ROCKSDB_LITE
   // Report new file to SstFileManagerImpl
@@ -1564,7 +1570,8 @@ Status CompactionJob::OpenCompactionOutputFile(
                            &syncpoint_arg);
 #endif
   Status s;
-  IOStatus io_s = NewWritableFile(fs_, fname, &writable_file, file_options_);
+  IOStatus io_s =
+      NewWritableFile(fs_.get(), fname, &writable_file, file_options_);
   s = io_s;
   if (sub_compact->io_status.ok()) {
     sub_compact->io_status = io_s;
@@ -1580,7 +1587,8 @@ Status CompactionJob::OpenCompactionOutputFile(
     EventHelpers::LogAndNotifyTableFileCreationFinished(
         event_logger_, cfd->ioptions()->listeners, dbname_, cfd->GetName(),
         fname, job_id_, FileDescriptor(), kInvalidBlobFileNumber,
-        TableProperties(), TableFileCreationReason::kCompaction, s);
+        TableProperties(), TableFileCreationReason::kCompaction, s,
+        kUnknownFileChecksum, kUnknownFileChecksumFuncName);
     return s;
   }
 

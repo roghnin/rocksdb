@@ -123,6 +123,7 @@ cpp_library(
         "cache/sharded_cache.cc",
         "db/arena_wrapped_db_iter.cc",
         "db/blob/blob_file_addition.cc",
+        "db/blob/blob_file_builder.cc",
         "db/blob/blob_file_garbage.cc",
         "db/blob/blob_file_meta.cc",
         "db/blob/blob_log_format.cc",
@@ -232,6 +233,7 @@ cpp_library(
         "monitoring/perf_level.cc",
         "monitoring/persistent_stats_history.cc",
         "monitoring/statistics.cc",
+        "monitoring/stats_dump_scheduler.cc",
         "monitoring/thread_status_impl.cc",
         "monitoring/thread_status_updater.cc",
         "monitoring/thread_status_updater_debug.cc",
@@ -529,6 +531,13 @@ ROCKS_TESTS = [
     [
         "blob_file_addition_test",
         "db/blob/blob_file_addition_test.cc",
+        "serial",
+        [],
+        [],
+    ],
+    [
+        "blob_file_builder_test",
+        "db/blob/blob_file_builder_test.cc",
         "serial",
         [],
         [],
@@ -1367,6 +1376,13 @@ ROCKS_TESTS = [
         [],
     ],
     [
+        "prefetch_test",
+        "file/prefetch_test.cc",
+        "serial",
+        [],
+        [],
+    ],
+    [
         "prefix_test",
         "db/prefix_test.cc",
         "serial",
@@ -1474,6 +1490,13 @@ ROCKS_TESTS = [
     [
         "statistics_test",
         "monitoring/statistics_test.cc",
+        "serial",
+        [],
+        [],
+    ],
+    [
+        "stats_dump_scheduler_test",
+        "monitoring/stats_dump_scheduler_test.cc",
         "serial",
         [],
         [],
