@@ -16,10 +16,7 @@
 
 #include "util/mutexlock.h"
 
-// TODO: make these run-time variables
 // #define PHEAP_PATH "/mnt/pmem/pmdk_cache/"
-#define PHEAP_PATH "/dev/shm/pmdk_cache/"
-#define PMEMOBJ_POOL_SIZE ((size_t)1024 * 1024 * 1024 * 2)
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -30,7 +27,9 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
                                size_t persist_capacity, size_t shard_id,
                                void* (*pack)(const Slice& value),
                                const Slice (*unpack)(void* value),
-                               void (*val_deleter)(const Slice& key, void* value))
+                               void (*val_deleter)(const Slice& key, void* value),
+                               const std::string& heap_path, size_t heap_size,
+                               bool new_on_exist)
     : capacity_(capacity),
       persistent_capacity_(persist_capacity),
       strict_capacity_limit_(strict_capacity_limit),
@@ -41,7 +40,7 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
   // TODO: set up an LRUCacheShard as transient tier.
 
   // Set up persistent memory pool (pop)
-  std::string heap_file = PHEAP_PATH + std::to_string(shard_id);
+  std::string heap_file = heap_path + std::to_string(shard_id);
   // TODO: use an alternative to access() that works on all platforms.
   // TODO: provide option to ignore existing pool and create new one.
   // TDOO: persist static metadata (capacity, etc) and report inconsistency with
@@ -49,7 +48,7 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
   try {
     if (access(heap_file.c_str(), F_OK) != 0) {
       pop_ = po::pool<PersistentRoot>::create(heap_file, "pmdk_cache_pool",
-                                              PMEMOBJ_POOL_SIZE, S_IRWXU);
+                                              heap_size, S_IRWXU);
       po::transaction::run(pop_, [&] {
         auto root = pop_.root();
         root->persistent_hashtable =
@@ -514,7 +513,10 @@ PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
                      void (*val_deleter)(const Slice& key, void* value),
                      std::shared_ptr<MemoryAllocator> allocator,
                      bool use_adaptive_mutex,
-                     CacheMetadataChargePolicy metadata_charge_policy)
+                     CacheMetadataChargePolicy metadata_charge_policy,
+                     const std::string& heap_path,
+                     size_t heap_size,
+                     bool new_on_exist)
     : ShardedCache(capacity, num_shard_bits, strict_capacity_limit,
                    std::move(allocator)) {
   num_shards_ = 1 << num_shard_bits;
@@ -528,7 +530,8 @@ PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
     new (&shards_[i])
         PMDKCacheShard(per_shard, strict_capacity_limit, high_pri_pool_ratio,
                        use_adaptive_mutex, metadata_charge_policy,
-                       per_shard_persist, (size_t)i, pack, unpack, val_deleter);
+                       per_shard_persist, (size_t)i, pack, unpack, val_deleter,
+                       heap_path, heap_size, new_on_exist);
   }
 }
 
@@ -610,7 +613,10 @@ std::shared_ptr<Cache> NewPMDKCache(
     int num_shard_bits,
     bool strict_capacity_limit, double high_pri_pool_ratio,
     std::shared_ptr<MemoryAllocator> memory_allocator, bool use_adaptive_mutex,
-    CacheMetadataChargePolicy metadata_charge_policy) {
+    CacheMetadataChargePolicy metadata_charge_policy,
+    const std::string& heap_path,
+    size_t heap_size,
+    bool new_on_exist) {
   if (num_shard_bits >= 20) {
     return nullptr;  // the cache cannot be sharded into too many fine pieces
   }
@@ -622,7 +628,7 @@ std::shared_ptr<Cache> NewPMDKCache(
       capacity, num_shard_bits, strict_capacity_limit, high_pri_pool_ratio,
       persist_capacity, pack, unpack, val_deleter,
       std::move(memory_allocator), use_adaptive_mutex,
-      metadata_charge_policy);
+      metadata_charge_policy, heap_path, heap_size, new_on_exist);
 }
 
 }  // namespace ROCKSDB_NAMESPACE

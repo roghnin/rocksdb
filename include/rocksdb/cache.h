@@ -131,7 +131,10 @@ extern std::shared_ptr<Cache> NewPMDKCache(
     std::shared_ptr<MemoryAllocator> memory_allocator = nullptr,
     bool use_adaptive_mutex = kDefaultToAdaptiveMutex,
     CacheMetadataChargePolicy metadata_charge_policy =
-        kDefaultCacheMetadataChargePolicy);
+        kDefaultCacheMetadataChargePolicy,
+    const std::string& heap_path = "/dev/shm/pmdk_cache/",
+    size_t heap_size = 1024 * 1024 * 1024,
+    bool new_on_exist = false);
 
 // Similar to NewLRUCache, but create a cache based on CLOCK algorithm with
 // better concurrent performance in some cases. See util/clock_cache.cc for

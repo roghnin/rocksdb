@@ -226,7 +226,9 @@ class ALIGN_AS(CACHE_LINE_SIZE) PMDKCacheShard final : public CacheShard {
                  size_t persist_capacity, size_t shard_id,
                  void* (*pack)(const Slice& value),
                  const Slice (*unpack)(void* value),
-                 void (*val_deleter)(const Slice& key, void* value));
+                 void (*val_deleter)(const Slice& key, void* value),
+                 const std::string& heap_path, size_t heap_size,
+                 bool new_on_exist);
   ~PMDKCacheShard();
 
   // Separate from constructor so caller can easily make an array of PMDKCache
@@ -356,7 +358,10 @@ class PMDKCache
             std::shared_ptr<MemoryAllocator> memory_allocator = nullptr,
             bool use_adaptive_mutex = kDefaultToAdaptiveMutex,
             CacheMetadataChargePolicy metadata_charge_policy =
-                kDontChargeCacheMetadata);
+                kDontChargeCacheMetadata,
+            const std::string& heap_path = "/dev/shm/pmdk_cache/",
+            size_t heap_size = 1024 * 1024 * 1024,
+            bool new_on_exist = false);
   virtual ~PMDKCache();
   const char* Name() const override { return "PMDKCache"; }
   CacheShard* GetShard(int shard) override;
