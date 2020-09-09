@@ -214,6 +214,8 @@ struct PersistentRoot {
   po::persistent_ptr<PersistentEntry> persistent_lru_list;
   po::p<size_t> usage;
   po::p<size_t> lru_usage;
+  po::p<size_t> persist_capacity;
+  po::p<size_t> max_capacity;
   po::p<size_t> era;
 };
 

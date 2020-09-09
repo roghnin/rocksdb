@@ -43,8 +43,6 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
   std::string heap_file = heap_path + std::to_string(shard_id);
   // TODO: use an alternative to access() that works on all platforms.
   // TODO: provide option to ignore existing pool and create new one.
-  // TDOO: persist static metadata (capacity, etc) and report inconsistency with
-  // arguments during recovery.
   try {
     if (access(heap_file.c_str(), F_OK) != 0) {
       pop_ = po::pool<PersistentRoot>::create(heap_file, "pmdk_cache_pool",
@@ -54,6 +52,8 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
         root->persistent_hashtable =
             po::make_persistent<PersistTierHashTable>(&pop_);
         root->persistent_lru_list = po::make_persistent<PersistentEntry>();
+        root->persist_capacity = persist_capacity;
+        root->max_capacity = heap_size - sizeof(PersistentRoot) - _SC_LEVEL2_CACHE_SIZE;
         root->usage = 0;
         root->lru_usage = 0;
         root->era = 0;
@@ -74,6 +74,7 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
       lru_usage_ = po::persistent_ptr<size_t>(&pop_.root()->lru_usage.get_rw());
       lru_ = pop_.root()->persistent_lru_list;
       era_ = ++pop_.root()->era;
+      SetPersistentCapacity(persist_capacity);
     }
   } catch (...) {
     // TODO: quit here.
@@ -231,8 +232,13 @@ void PMDKCacheShard::SetPersistentCapacity(size_t capacity) {
     autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
     {
       MutexLock l(&mutex_);
-      persistent_capacity_ = capacity;
-      EvictFromLRU(0, &last_reference_list);
+      if (pop_.root()->max_capacity < capacity){
+        // TODO: throw exception.
+      } else {
+        persistent_capacity_ = capacity;
+        pop_.root()->persist_capacity = capacity;
+        EvictFromLRU(0, &last_reference_list);
+      }
     }
 
     // Free the entries outside of mutex for performance reasons
