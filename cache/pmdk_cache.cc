@@ -40,45 +40,58 @@ PMDKCacheShard::PMDKCacheShard(size_t capacity, bool strict_capacity_limit,
   // TODO: set up an LRUCacheShard as transient tier.
 
   // Set up persistent memory pool (pop)
+  assert(heap_path.back() == '/');
   std::string heap_file = heap_path + std::to_string(shard_id);
-  // TODO: use an alternative to access() that works on all platforms.
-  // TODO: provide option to ignore existing pool and create new one.
-  try {
-    if (access(heap_file.c_str(), F_OK) != 0) {
-      pop_ = po::pool<PersistentRoot>::create(heap_file, "pmdk_cache_pool",
-                                              heap_size, S_IRWXU);
-      po::transaction::run(pop_, [&] {
-        auto root = pop_.root();
-        root->persistent_hashtable =
-            po::make_persistent<PersistTierHashTable>(&pop_);
-        root->persistent_lru_list = po::make_persistent<PersistentEntry>();
-        root->persist_capacity = persist_capacity;
-        root->max_capacity = heap_size - sizeof(PersistentRoot) - _SC_LEVEL2_CACHE_SIZE;
-        root->usage = 0;
-        root->lru_usage = 0;
-        root->era = 0;
-        usage_ = po::persistent_ptr<size_t>(&root->usage.get_rw());
-        lru_usage_ = po::persistent_ptr<size_t>(&root->lru_usage.get_rw());
-        persistent_hashtable_ = root->persistent_hashtable;
-        lru_ = root->persistent_lru_list;
-        // empty circular linked lru list
-        lru_->next_lru = lru_;
-        lru_->prev_lru = lru_;
-      });
-      era_ = 0;
+  fs::path heap_file_path(heap_file);
+  // heap file exists
+  if (fs::exists(heap_file_path) && !fs::is_directory(heap_file_path)){
+    if (new_on_exist){
+      // remove existing heap and create new one below.
+      fs::remove(heap_file_path);
     } else {
       pop_ = po::pool<PersistentRoot>::open(heap_file, "pmdk_cache_pool");
-      persistent_hashtable_ = pop_.root()->persistent_hashtable;
-      persistent_hashtable_->SetPop(&pop_);
-      usage_ = po::persistent_ptr<size_t>(&pop_.root()->usage.get_rw());
-      lru_usage_ = po::persistent_ptr<size_t>(&pop_.root()->lru_usage.get_rw());
-      lru_ = pop_.root()->persistent_lru_list;
-      era_ = ++pop_.root()->era;
-      SetPersistentCapacity(persist_capacity);
+      // new capacity is incompatible with existing heap
+      if (pop_.root()->max_capacity < persist_capacity){
+        // TODO: report error.
+        assert(false && "please handle error here: persist capacity too large");
+      } else {
+        persistent_hashtable_ = pop_.root()->persistent_hashtable;
+        persistent_hashtable_->SetPop(&pop_);
+        usage_ = po::persistent_ptr<size_t>(&pop_.root()->usage.get_rw());
+        lru_usage_ = po::persistent_ptr<size_t>(&pop_.root()->lru_usage.get_rw());
+        lru_ = pop_.root()->persistent_lru_list;
+        era_ = ++pop_.root()->era;
+        SetPersistentCapacity(persist_capacity);
+        return;
+      }
     }
-  } catch (...) {
-    // TODO: quit here.
   }
+  // create new heap.
+  if (heap_size < PMEMOBJ_MIN_POOL){
+    // TODO: report error.
+    assert(false && "please handle error here: heap size too small");
+  }
+  pop_ = po::pool<PersistentRoot>::create(heap_file, "pmdk_cache_pool",
+                                          heap_size, S_IRWXU);
+  po::transaction::run(pop_, [&] {
+    auto root = pop_.root();
+    root->persistent_hashtable =
+        po::make_persistent<PersistTierHashTable>(&pop_);
+    root->persistent_lru_list = po::make_persistent<PersistentEntry>();
+    root->persist_capacity = persist_capacity;
+    root->max_capacity = heap_size - sizeof(PersistentRoot) - _SC_LEVEL2_CACHE_SIZE;
+    root->usage = 0;
+    root->lru_usage = 0;
+    root->era = 0;
+    usage_ = po::persistent_ptr<size_t>(&root->usage.get_rw());
+    lru_usage_ = po::persistent_ptr<size_t>(&root->lru_usage.get_rw());
+    persistent_hashtable_ = root->persistent_hashtable;
+    lru_ = root->persistent_lru_list;
+    // empty circular linked lru list
+    lru_->next_lru = lru_;
+    lru_->prev_lru = lru_;
+  });
+  era_ = 0;
 }
 
 PMDKCacheShard::~PMDKCacheShard() {
@@ -99,7 +112,7 @@ void PMDKCacheShard::EraseUnRefEntries() {
       while (lru_->next_lru != lru_) {
         po::persistent_ptr<PersistentEntry> old = lru_->next_lru;
         // LRU list contains only elements which can be evicted
-        assert(old->InCache() && !old->HasRefs());
+        assert(old->InCache() && !old->HasRefs(era_));
         LRU_Remove(old);
         persistent_hashtable_->Remove(old);
         old->SetInCache(false);
@@ -158,7 +171,7 @@ void PMDKCacheShard::EvictFromLRU(
   while ((*usage_ + charge) > persistent_capacity_ && lru_->next_lru != lru_) {
     po::persistent_ptr<PersistentEntry> old = lru_->next_lru;
     // LRU list contains only elements which can be evicted
-    assert(old->InCache() && !old->HasRefs());
+    assert(old->InCache() && !old->HasRefs(era_));
     LRU_Remove(old);
     persistent_hashtable_->Remove(old);
     old->SetInCache(false);
@@ -232,13 +245,10 @@ void PMDKCacheShard::SetPersistentCapacity(size_t capacity) {
     autovector<po::persistent_ptr<PersistentEntry>> last_reference_list;
     {
       MutexLock l(&mutex_);
-      if (pop_.root()->max_capacity < capacity){
-        // TODO: throw exception.
-      } else {
-        persistent_capacity_ = capacity;
-        pop_.root()->persist_capacity = capacity;
-        EvictFromLRU(0, &last_reference_list);
-      }
+      assert(pop_.root()->max_capacity >= capacity);
+      persistent_capacity_ = capacity;
+      pop_.root()->persist_capacity = capacity;
+      EvictFromLRU(0, &last_reference_list);
     }
 
     // Free the entries outside of mutex for performance reasons
@@ -263,7 +273,7 @@ Cache::Handle* PMDKCacheShard::Lookup(const Slice& key, uint32_t hash) {
   if (e.get() != nullptr) {
     th = GetTransientHandle(e);
     assert(e->InCache());
-    if (!e->HasRefs()) {
+    if (!e->HasRefs(era_)) {
       LRU_Remove(e);
     }
     th->Ref();
@@ -405,7 +415,7 @@ Status PMDKCacheShard::Insert(const Slice& key, uint32_t hash, void* value,
               persist_s = Status::OkOverwritten();
               assert(old->InCache());
               old->SetInCache(false);
-              if (!old->HasRefs()) {
+              if (!old->HasRefs(era_)) {
                 LRU_Remove(old);
                 size_t old_persist_charge = old->persist_charge;
                 assert(*usage_ >= old_persist_charge);
@@ -474,7 +484,7 @@ void PMDKCacheShard::Erase(const Slice& key, uint32_t hash) {
         if (e.get() != nullptr) {
           assert(e->InCache());
           e->SetInCache(false);
-          if (!e->HasRefs()) {
+          if (!e->HasRefs(era_)) {
             // The entry is in LRU since it's in hash and has no external
             // references
             LRU_Remove(e);
@@ -531,13 +541,36 @@ PMDKCache::PMDKCache(size_t capacity, int num_shard_bits,
   size_t per_shard = (capacity + (num_shards_ - 1)) / num_shards_;
   size_t per_shard_persist =
       (persist_capacity + (num_shards_ - 1)) / num_shards_;
-  // TODO: create directory `PHEAP_PATH` here.
+  
+  fs::path heap_dir(heap_path);
+  std::string absolute_heap_path = fs::absolute(heap_dir).string() + "/";
+  if (!fs::exists(heap_dir)){
+    fs::create_directory(heap_dir);
+  } else {
+    bool heaps_exist = true;
+    for (int i = 0; i < num_shards_; i++) {
+      fs::path shard_path(absolute_heap_path + std::to_string(i));
+      if (!fs::exists(shard_path) || fs::is_directory(shard_path)){
+        heaps_exist = false;
+        break;
+      }
+    }
+    if (!heaps_exist) {
+      if (new_on_exist) {
+        fs::remove(heap_dir);
+        fs::create_directory(heap_dir);
+      } else {
+        // TODO: report error.
+        assert(false && "please handle error here: heap file missing.");
+      }
+    }
+  }
   for (int i = 0; i < num_shards_; i++) {
     new (&shards_[i])
         PMDKCacheShard(per_shard, strict_capacity_limit, high_pri_pool_ratio,
                        use_adaptive_mutex, metadata_charge_policy,
                        per_shard_persist, (size_t)i, pack, unpack, val_deleter,
-                       heap_path, heap_size, new_on_exist);
+                       absolute_heap_path, heap_size, new_on_exist);
   }
 }
 
@@ -600,7 +633,7 @@ size_t PMDKCache::TEST_GetLRUSize() {
   return lru_size_of_all_shards;
 }
 
-// TDOO: add options in LRUCacheOptions
+// TODO: add options in LRUCacheOptions
 // std::shared_ptr<Cache> NewPMDKCache(const LRUCacheOptions& cache_opts) {
 //   // TODO: make this dynamic:
 //   size_t persist_capacity = 1024 * 1024 * 1024;
@@ -629,7 +662,6 @@ std::shared_ptr<Cache> NewPMDKCache(
   if (num_shard_bits < 0) {
     num_shard_bits = GetDefaultCacheShardBits(capacity);
   }
-
   return std::make_shared<PMDKCache>(
       capacity, num_shard_bits, strict_capacity_limit, high_pri_pool_ratio,
       persist_capacity, pack, unpack, val_deleter,

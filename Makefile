@@ -374,7 +374,7 @@ ifndef DISABLE_JEMALLOC
 endif
 
 ifdef USE_PMDK
-	PLATFORM_LDFLAGS += -L/usr/local/lib64 -lpmem -lpmemobj
+	PLATFORM_LDFLAGS += -L/usr/local/lib64 -lpmem -lpmemobj -lstdc++fs
 	PLATFORM_CXXFLAGS += -DPMDK
 	PLATFORM_CCFLAGS  += -DPMDK
 endif

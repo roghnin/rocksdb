@@ -5,10 +5,13 @@
 
 #include "cache/pmdk_cache.h"
 
+#include <experimental/filesystem>
 #include <string>
 #include <vector>
 #include "port/port.h"
 #include "test_util/testharness.h"
+
+namespace fs = std::experimental::filesystem;
 
 namespace ROCKSDB_NAMESPACE {
 
@@ -41,9 +44,14 @@ class PMDKCacheTest : public testing::Test {
 
   static void* ValuePack(const Slice& value) { return new Value(value); }
 
-  void NewCache(size_t capacity, size_t persist_capacity,
+  void NewCache(size_t capacity, size_t persist_capacity, bool new_on_exist,
                 double high_pri_pool_ratio = 0.0,
                 bool use_adaptive_mutex = kDefaultToAdaptiveMutex) {
+    std::string heap_dir = "/dev/shm/pmdk_cache/";
+    fs::path heap_path(heap_dir);
+    if (!fs::exists(heap_path)){
+      fs::create_directory(heap_dir);
+    }
     DeleteCache();
     cache_ = reinterpret_cast<PMDKCacheShard*>(
         port::cacheline_aligned_alloc(sizeof(PMDKCacheShard)));
@@ -51,7 +59,9 @@ class PMDKCacheTest : public testing::Test {
         PMDKCacheShard(capacity, false /*strict_capcity_limit*/,
                        high_pri_pool_ratio, use_adaptive_mutex,
                        kDontChargeCacheMetadata, persist_capacity, (size_t)0,
-                       &ValuePack, &ValueUnpack, &ValueDeleter);
+                       &ValuePack, &ValueUnpack, &ValueDeleter,
+                       heap_dir, 8*1024*1024 /* heap size, smallest */,
+                       new_on_exist);
   }
 
   void Insert(const std::string& key) {
@@ -60,7 +70,7 @@ class PMDKCacheTest : public testing::Test {
   }
 
   bool Lookup(const std::string& key) {
-    auto handle = cache_->Lookup(key, 0 /*hash*/, &ValueDeleter);
+    auto handle = cache_->Lookup(key, 0 /*hash*/);
     if (handle) {
       cache_->Release(handle);
       return true;
@@ -91,7 +101,7 @@ class PMDKCacheTest : public testing::Test {
 TEST_F(PMDKCacheTest, BasicLRU) {
   size_t entry_charge = PMDKCache::GetBasePersistCharge() +
                         sizeof(char) /*key*/ + sizeof(char) + 1 /*val*/;
-  NewCache(5, 5 * entry_charge);
+  NewCache(5, 5 * entry_charge, true);
   // prepare payloads:
   std::string payloads1[] = {"a", "b", "c", "d", "e"};
   for (int i = 0; i < 5; i++) {
@@ -120,7 +130,7 @@ TEST_F(PMDKCacheTest, BasicLRU) {
   ValidateLRUList({"e", "z", "d", "u", "v"});
 
   // try recovery
-  NewCache(5, 5 * entry_charge);
+  NewCache(5, 5 * entry_charge, false);
   ValidateLRUList({"e", "z", "d", "u", "v"});
   ASSERT_TRUE(Lookup("e"));
   ASSERT_TRUE(Lookup("z"));

@@ -10,6 +10,7 @@
 
 #include <unistd.h>
 
+#include <experimental/filesystem>
 #include <string>
 
 #include <libpmemobj++/make_persistent.hpp>
@@ -26,6 +27,7 @@
 #include "port/port.h"
 #include "util/autovector.h"
 
+namespace fs = std::experimental::filesystem;
 namespace po = pmem::obj;
 
 namespace ROCKSDB_NAMESPACE {
@@ -83,7 +85,7 @@ struct PersistentEntry {
   // persistent flags:
   po::p<bool> in_cache;
 
-  size_t era = 0;
+  po::p<size_t> era = 0;
   // transient fields, validated with era number:
   TransientHandle* trans_handle = nullptr;
 
@@ -92,8 +94,8 @@ struct PersistentEntry {
   //   trans_handle->Ref();
   // }
   bool InCache() { return in_cache; }
-  bool HasRefs() {
-    if (trans_handle == nullptr) {
+  bool HasRefs(size_t curr_era) {
+    if (era < curr_era || trans_handle == nullptr) {
       return false;
     } else {
       return trans_handle->HasRefs();
