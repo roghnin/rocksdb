@@ -3,6 +3,7 @@ LIB_SOURCES =                                                   \
   cache/cache.cc                                                \
   cache/clock_cache.cc                                          \
   cache/lru_cache.cc                                            \
+  cache/pmdk_cache.cc                                            \
   cache/sharded_cache.cc                                        \
   db/arena_wrapped_db_iter.cc                                   \
   db/blob/blob_file_addition.cc                                 \
@@ -340,6 +341,7 @@ BENCH_MAIN_SOURCES =                                                    \
 TEST_MAIN_SOURCES =                                                     \
   cache/cache_test.cc                                                   \
   cache/lru_cache_test.cc                                               \
+  cache/pmdk_cache_test.cc                                               \
   db/blob/blob_file_addition_test.cc                                    \
   db/blob/blob_file_builder_test.cc                                     \
   db/blob/blob_file_garbage_test.cc                                     \
